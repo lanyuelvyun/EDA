@@ -90,7 +90,7 @@ def get_var_density(threshold, df_train, df_test, bins, save_path):
     for i in var_list:
         print(("特征 %s" % i).center(80, '*'))
 		
-		# 每一个特征，去掉空值的情况
+	# 每一个特征，去掉空值的情况
         df_train = df_train[df_train[i].notnull()]
         df_test = df_test[df_test[i].notnull()]
 		
@@ -119,14 +119,14 @@ def get_var_odds(threshold, df_train, df_test, bins, save_path):
     for i in var_list:
         print(("特征 %s" % i).center(80, '*'))
 		
-		# 每一个特征，去掉空值的情况
+	# 每一个特征，去掉空值的情况
         df_train = df_train[df_train[i].notnull()]
         df_test = df_test[df_test[i].notnull()]
 		
         # 对每一个特征进行分箱，返回带有分箱信息的df
         df_all_bins = get_var_bins(threshold, i, df_train, df_test, bins)
 		
-		# 根据bins进行分组,统计每一个bin中样本的总个数
+	# 根据bins进行分组,统计每一个bin中样本的总个数
         # 先将两个集合拆出来，各自统计.此时index就是bins
         df_train_count = df_all_bins[df_all_bins["is_train"] == 1].groupby("bins").count()
         df_test_count = df_all_bins[df_all_bins["is_train"] == 0].groupby("bins").count()
@@ -134,7 +134,7 @@ def get_var_odds(threshold, df_train, df_test, bins, save_path):
         df_all_count = pd.merge(df_train_count, df_test_count, right_index=True, left_index=True, how="outer")
         df_all_count.fillna(0, inplace=True)
 		
-		# 根据bins进行分组,统计每一个bin中label=1样本的个数
+	# 根据bins进行分组,统计每一个bin中label=1样本的个数
         # 先将两个集合拆出来，各自统计.此时index就是bins
         df_train_sum = df_all_bins[df_all_bins["is_train"] == 1].groupby("bins").sum()
         df_test_sum = df_all_bins[df_all_bins["is_train"] == 0].groupby("bins").sum()
