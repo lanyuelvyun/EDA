@@ -21,11 +21,11 @@ reload(sys)
 sys.setdefaultencoding('utf-8')
 
 
-# 得到特征的code和describe。（conf文件是一个特征的配置文件，有3列，分别为：特征code，特征英文名，特征中文描述）
-def get_features_list():
+# 得到特征的code和describe。
+def get_features_list(var_conf_path):
     list_name = []
     list_desc = []
-    with codecs.open(r"E:\work\2 mission\acard\acard_dae\f_conf\test.conf", 'r', encoding="utf-8") as fr:
+    with codecs.open(var_conf_path, 'r', encoding="utf-8") as fr:
         for l in fr.readlines():
             if len(l) > 4 and l[0] != '#':
                 ll = l.strip().split('\t')
@@ -154,11 +154,14 @@ def get_var_odds(threshold, df_train, df_test, bins, save_path):
 
 if __name__ == "__main__":
     df_all = pd.read_csv(r'E:\work\2 mission\acard\acard_dae\source\final_main_0814_1007_1.csv', na_values=[-3, -2, -1])
+    # 图片保存地址
     density_save_path = r'E:\work\2 mission\transform_model\transform_model_zx_dae\result\plot_var_density'
     odds_save_path = r'E:\work\2 mission\transform_model\transform_model_zx_dae\result\plot_var_odds'
+    # conf文件是一个特征的配置文件，有3列，分别为：特征code，特征英文名，特征中文描述
+    var_conf_path = r"E:\work\2 mission\acard\acard_dae\f_conf\test.conf"
+	
     df_all["label"] = df_all.apply(lambda x: 1 if x["overdue_day"] > 7 else 0, axis=1)
-
-    var_list, _ = get_features_list()
+    var_list, _ = get_features_list(var_conf_path)
     df_all = df_all[var_list + ["user_id","loan_id", "label", "overdue_day", "created"]]
     # 按照created时间，分成2个集合
     df_train = df_all[df_all["created"] < 20180920]
