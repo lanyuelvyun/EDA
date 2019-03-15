@@ -25,7 +25,7 @@ pd.set_option('expand_frame_repr', False)
 def get_varures_list():
     list_name = []
     list_desc = []
-    with codecs.open(r"E:\work\2 mission\1 acard\acard_dae\f_conf\acard_zx_dae_v1.conf", 'r', encoding="utf-8") as fr:
+    with codecs.open(r"E:\work\2 mission\acard\acard_dae\source\补数据\补数id&商务返回\亿美\yimei.conf", 'r', encoding="utf-8") as fr:
         for l in fr.readlines():
             if len(l) > 4 and l[0] != '#':
                 ll = l.strip().split('\t')
