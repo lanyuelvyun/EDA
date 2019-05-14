@@ -4,4 +4,6 @@
 二、该工程给出了对于【二分类】任务来说，基本的EDA流程和步骤
 针对Python2.7，中文博客https://blog.csdn.net/lanyuelvyun/article/details/82151767
 
+其中，EDA.py里面包含了计算缺失率、计算方差等等基本的变量分析步骤；VariableDistribution.py是绘制变量的分布图。
+
 欢迎指正！
