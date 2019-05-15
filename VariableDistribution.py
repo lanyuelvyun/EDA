@@ -68,6 +68,7 @@ class VariableDistribution(object):
     def get_var_distribution(self):
         """
         变量分布图：对该变量进行分箱，统计每一箱内的值个数占比
+        odds图：对该变量进行分箱，计算每一个分箱内label=1的样本占该分箱内总样本的比例，查看变量对2类样本的区分能力
         """
         print("get var distribution and odds".center(80, '*'))
         print(("variable %s" % self.__var_name).center(80, '*'))
@@ -82,7 +83,6 @@ class VariableDistribution(object):
         # y：distribution = (the number of values in each bin)/(total numbel of values in each bin)
         y_list1 = df_all_groupby.sum()["flag"] * 1.0 / len(self.__value_list1)
         y_list2 = (df_all_groupby.count()["flag"] * 1.0 - df_all_groupby.sum()["flag"] * 1.0) / len(self.__value_list2)
-        # calculate odds
         # y：odds = (number of samples with label=1 in each bin)/(total number of samples in this bin)
         result = df_all_groupby.apply(lambda x: (x[(x["flag"] == 1) & (x["label"] == 1)].shape[0], x[x["flag"] == 1].shape[0]))
         y_list3 = result.map(lambda x: x[0]) * 1.0 / (result.map(lambda x: x[1]) + 1e-20)
@@ -131,7 +131,7 @@ class VariableDistribution(object):
 
 
 if __name__ == '__main__':
-	# 2 sets
+    # 2 sets，which have same columns
     df1 = pd.read_csv('set1.csv')
     df1 = pd.read_csv('set2.csv')
     save_path = r"result"
@@ -139,7 +139,7 @@ if __name__ == '__main__':
     # feat_list
     var_list = df1.columns.tolist()
 
-	# parameter
+    # parameter
     var_threshold = 50  # 当unique(特征值)的个数<50的时候，该变量当做离散变量处理
     bins = 30  # 分成30箱
     binning_mode = "cut"  # 分箱模式："cut"等宽，"qcut"等频
