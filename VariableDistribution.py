@@ -22,8 +22,8 @@ class VariableDistribution(object):
     def __init__(self, var_name, value_list1, label_list1, value_list2, label_list2, var_threshold, bins, binning_mode, save_path):
         """
         @目的：针对2分类任务的变量分析
-        1）分布图：比较2个集合中，同一变量的值分布情况，查看变量的分布是否一致
-        2）odds图：比较2个集合中，同一变量对2类样本的区分能力，查看变量区分能力是否一致
+        1）频数占比分布图：比较2个集合中，同一变量值的频数占比分布情况，查看该变量的频数分布是否一致
+        2）odds图（比率图）：比较2个集合中，同一变量对2类样本的区分能力，查看变量区分能力是否一致
         :param var_name: variable name
         :param value_list1: the value_list of the variable
         :param label_list1: sample label_list, one-to-one correspondence with value_list1. like[1,1,0,0,1,0,0,0,0]
@@ -67,8 +67,8 @@ class VariableDistribution(object):
 
     def get_var_distribution(self):
         """
-        变量分布图：对该变量进行分箱，统计每一箱内的值个数占比
-        odds图：对该变量进行分箱，计算每一个分箱内label=1的样本占该分箱内总样本的比例，查看变量对2类样本的区分能力
+        频数占比分布图：对该变量进行分箱，统计（每一箱内样本个数）/总样本个数
+        odds图（比率图）：对该变量进行分箱，统计（每一个分箱内label=1的样本个数）/（该分箱内label=0的样本个数），可以看出该变量对2类样本的区分能力
         """
         print("get var distribution and odds".center(80, '*'))
         print(("variable %s" % self.__var_name).center(80, '*'))
@@ -84,9 +84,9 @@ class VariableDistribution(object):
         y_list1 = df_all_groupby.sum()["flag"] * 1.0 / len(self.__value_list1)
         y_list2 = (df_all_groupby.count()["flag"] * 1.0 - df_all_groupby.sum()["flag"] * 1.0) / len(self.__value_list2)
         # y：odds = (number of samples with label=1 in each bin)/(total number of samples in this bin)
-        result = df_all_groupby.apply(lambda x: (x[(x["flag"] == 1) & (x["label"] == 1)].shape[0], x[x["flag"] == 1].shape[0]))
+        result = df_all_groupby.apply(lambda x: (x[(x["flag"] == 1) & (x["label"] == 1)].shape[0], x[(x["flag"] == 1) & (x["label"] == 0)].shape[0]))
         y_list3 = result.map(lambda x: x[0]) * 1.0 / (result.map(lambda x: x[1]) + 1e-20)
-        result = df_all_groupby.apply(lambda x: (x[(x["flag"] == 0) & (x["label"] == 1)].shape[0], x[x["flag"] == 0].shape[0]))
+        result = df_all_groupby.apply(lambda x: (x[(x["flag"] == 0) & (x["label"] == 1)].shape[0], x[(x["flag"] == 0) & (x["label"] == 0)].shape[0]))
         y_list4 = result.map(lambda x: x[0]) * 1.0 / (result.map(lambda x: x[1]) + 1e-20)
         # plot
         self.__plot_distribution(x_list, y_list1, y_list2, y_list3, y_list4)
