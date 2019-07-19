@@ -149,22 +149,6 @@ def get_psi_kl(df_stat_binning_train, df_stat_binning_test, var_list):
     df_var_psi = df_var_psi[["var_name", "psi", "kl"]]
     df_var_psi.sort_values(by="psi").to_csv(r"result/var_psi_kl.csv", index=None)
 
-
-# 请求数据中间层接口，将JSON导入mysql
-# Python请求数据讲解 https://www.jianshu.com/p/3c790e98ea8d
-def insert_to_mysql():
-    with open("result/df_stat_json.txt", 'r') as json_file:
-        var_info = json.load(json_file)
-
-    headers = {'content-type': "application/json"}
-    res = requests.post("http://10.238.163.132:8002/dsm/saveparam", json=var_info, headers=headers)  # 测试环境
-    # res = requests.post("http://10.96.30.26:8001/dsm/saveparam", json=var_info, headers=headers)  # 线上环境
-    print("RES.TEXT".center(80, '='))
-    print(res.text)
-    print("RES.STATUS_CODE".center(80, '='))
-    print(res.status_code)
-
-
 if __name__ == '__main__':
     import numpy as np
     df_conf = pd.read_csv("f_conf/acard_zx_dae_v1_feat_monitor.conf", dtype=str)
@@ -172,7 +156,7 @@ if __name__ == '__main__':
     # var_list = ['01004003','01001003']
     df_train = pd.read_csv(r".\source\20181212\final_main_0814_1007_1.csv")[var_list]
     print(df_train.shape)
-    print("对train集进行分箱，并统计每箱内的人数占比")
+    print("对train集进行分箱，并统计每箱内的人数占比，并记录下分箱区间。")
     offline_stat(df_train, var_list)
 
     # example
