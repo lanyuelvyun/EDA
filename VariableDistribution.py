@@ -22,8 +22,8 @@ class VariableDistribution(object):
     def __init__(self, var_name, value_list1, label_list1, value_list2, label_list2, var_threshold, bins, binning_mode, save_path):
         """
         @目的：针对2分类任务的变量分析
-        1）频数占比分布图：比较2个集合中，同一变量值的频数占比分布情况，查看该变量的频数分布是否一致
-        2）odds图（比率图）：比较2个集合中，同一变量对2类样本的区分能力，查看变量区分能力是否一致
+        1）分布图：比较2个集合中，同一变量的值分布情况，查看变量的分布是否一致
+        2）odds图：比较2个集合中，同一变量对2类样本的区分能力，查看变量区分能力是否一致
         :param var_name: variable name
         :param value_list1: the value_list of the variable
         :param label_list1: sample label_list, one-to-one correspondence with value_list1. like[1,1,0,0,1,0,0,0,0]
@@ -44,7 +44,9 @@ class VariableDistribution(object):
         self.__bins = bins
         self.__binning_mode = binning_mode
         self.__save_path = save_path
-
+        # self.get_var_distribution()
+        # self.get_var_odds()
+        # self.calc_bad_good_rate()
 
     def calc_bad_good_rate(self):
         """
@@ -61,14 +63,13 @@ class VariableDistribution(object):
         bad_num2 = sum(self.__label_list2)
         good_num2 = total_num2 - bad_num2
         bad_rate2 = bad_num2 * 1.0 / (total_num2 + 1e-20)
-        good_rate2 = good_num2 * 1.0 / (total_num2+ 1e-20)
+        good_rate2 = good_num2 * 1.0 / (total_num2 + 1e-20)
         print("bad_rate2 = %s, good_rate2 = %s" % (bad_rate2, good_rate2))
         # return bad_rate, good_rate
 
     def get_var_distribution(self):
         """
-        频数占比分布图：对该变量进行分箱，统计（每一箱内样本个数）/总样本个数
-        odds图（比率图）：对该变量进行分箱，统计（每一个分箱内label=1的样本个数）/（该分箱内label=0的样本个数），可以看出该变量对2类样本的区分能力
+        变量分布图：对该变量进行分箱，统计每一箱内的值个数占比
         """
         print("get var distribution and odds".center(80, '*'))
         print(("variable %s" % self.__var_name).center(80, '*'))
@@ -79,11 +80,12 @@ class VariableDistribution(object):
 
         # calculate distribution
         # x：each bin
-        x_list = [str(x) for x in df_all_groupby.count().index]
-        # y：distribution = (the number of values in each bin)/(total numbel of values in each bin)
+        x_list = [str(x) for x in df_all_groupby.count().index]  # 必须是str类型，才能作为X轴坐标用来画图，原始的index是Interval类型
+        # y：distribution = (the number of values in each bin)/(total numbel of values)
         y_list1 = df_all_groupby.sum()["flag"] * 1.0 / len(self.__value_list1)
         y_list2 = (df_all_groupby.count()["flag"] * 1.0 - df_all_groupby.sum()["flag"] * 1.0) / len(self.__value_list2)
-        # y：odds = (number of samples with label=1 in each bin)/(total number of samples in this bin)
+        # calculate odds
+        # y：odds = (number of samples with label=1 in each bin)/(number of samples with label=0 in each bin)
         result = df_all_groupby.apply(lambda x: (x[(x["flag"] == 1) & (x["label"] == 1)].shape[0], x[(x["flag"] == 1) & (x["label"] == 0)].shape[0]))
         y_list3 = result.map(lambda x: x[0]) * 1.0 / (result.map(lambda x: x[1]) + 1e-20)
         result = df_all_groupby.apply(lambda x: (x[(x["flag"] == 0) & (x["label"] == 1)].shape[0], x[(x["flag"] == 0) & (x["label"] == 0)].shape[0]))
@@ -113,17 +115,26 @@ class VariableDistribution(object):
         return df_var_all
 
     def __plot_distribution(self, x_list, y_list1, y_list2, y_list3, y_list4):
-        plt.figure(figsize=(10, 8))
+        plt.figure(figsize=(20, 8))
         plt.tick_params(labelsize=8)  # tick_params可设置坐标轴刻度值属性
-        plt.bar(x_list, y_list1, label='set_1_distribution', width=0.5, bottom=0, facecolor='lightskyblue', alpha=0.5)
-        plt.bar(x_list, y_list2, label='set_2_distribution', width=0.5, bottom=0, facecolor='orange', alpha=0.5)
-        plt.plot(x_list, y_list3, label='set_1_odds', color="lightskyblue")
-        plt.plot(x_list, y_list4, label='set_2_odds', color="orange")
-        plt.xticks(x_list, color='black', rotation=60)  # 横坐标旋转60度
-        plt.title('%s analysis' % self.__var_name)
+        # feat distribution
+        plt.subplot(121)
+        plt.bar(x_list, y_list1, label='set_1_distribution', width=0.5, bottom=0, facecolor='blue', alpha=0.5)
+        plt.bar(x_list, y_list2, label='set_2_distribution', width=0.5, bottom=0, facecolor='red', alpha=0.5)
+        plt.xticks(x_list, color='black', rotation=45)  # 横坐标旋转60度
+        plt.title('%s distribution' % self.__var_name)
         plt.xlabel("%s" % self.__var_name)
-        plt.ylabel("distribution/odds")
-        plt.legend()
+        plt.legend()  # 用来显示图例
+        plt.ylabel("distribution")
+        # feat odds
+        plt.subplot(122)
+        plt.plot(x_list, y_list3, label='set_1_odds', color="blue")
+        plt.plot(x_list, y_list4, label='set_2_odds', color="red")
+        plt.xticks(x_list, color='black', rotation=45)  # 横坐标旋转60度
+        plt.title('%s odds' % self.__var_name)
+        plt.xlabel("%s" % self.__var_name)
+        plt.ylabel("odds=bad/good")
+        plt.legend()  # 用来显示图例
         path = os.path.join(self.__save_path, self.__var_name+'.png')
         print("save_path is %s" % path)
         plt.savefig(path)
