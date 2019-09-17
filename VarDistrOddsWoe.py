@@ -183,13 +183,14 @@ class VarDistrOddsWoe(object):
 
 
 if __name__ == '__main__':
-    # test
-    save_path = r"./result"
-    df1 = pd.read_csv(r"./source/data1.csv")
-    df2 = pd.read_csv(r"./source/data2.csv")
-    
+     # test
+    save_path = r"..\result\Odds"
+    # df1与df2必须有label
+    df1 = pd.read_csv(r"../data1.csv", encoding='utf-8', na_values=[-1.0, -2.0, -3.0, -99.0, -999.0])
+    df2 = pd.read_csv(r"../data2.csv", encoding='utf-8', na_values=[-1.0, -2.0, -3.0, -99.0, -999.0])
+
     # feat_list
-    var_list = df1.columns
+    var_list = df1.columns.tolist()
     
     var_threshold = 30  # 当unique(特征值)的个数<50的时候，该变量当做离散变量处理
     bins = 10  # 分成30箱
