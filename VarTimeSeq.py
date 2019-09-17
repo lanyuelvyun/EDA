@@ -25,7 +25,7 @@ class VarTimeSeq(object):
         3) odds图：用时间进行分箱，粒度可以是月/周/天，查看每月/周/天 的逾期率
         :param var_name: 特征名称
         :param df: 包含特征var_name和label的dataframe
-        :param split_col: 用来进行分箱的列，一般是时间
+        :param split_col: 用来进行分箱的列，一般是时间，粒度可以是月/周/天
         :param save_path:
         """
         self.__var_name = var_name
