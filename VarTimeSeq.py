@@ -41,7 +41,8 @@ class VarTimeSeq(object):
         df_result = pd.concat([df_quantile, df_coverage, df_odds], axis=1, join='outer')  # 按照列进行拼接
         df_result.rename(columns={0: "coverage", 1: "odds"}, inplace=True)
 
-        df_result.to_csv(self.__save_path + '/%s_coverage_quantile_odds.csv' % self.__var_name)
+        df_result.to_csv(os.path.join(self.__save_path ,'%_quantile_coverage_odds.csv' % self.__var_name),index=True,encoding="utf-8")
+        print(os.path.join(self.__save_path ,'%_quantile_coverage_odds.csv' % self.__var_name))
         self.__plot(df_result)
 
     def get_var_odds(self):
@@ -50,26 +51,30 @@ class VarTimeSeq(object):
         """
         print("get var odds".center(80, '*'))
         df_copy = self.__df.copy()
-        df_odds = df_copy.groupby(self.__split_col).apply(lambda x: x[x["label"] == 1].shape[0]*1.0 / x[x["label"] == 0].shape[0])
+        df_odds = df_copy.groupby(self.__split_col).apply(lambda x: x["label"].sum()*1.0 / (x[x["label"] == 0].shape[0]+1e-20))
         return df_odds
 
     def get_var_coverage(self):
         """
-        计算该特征每个月/周/天的覆盖度，观察跨月/周/天稳定性
+        计算该特征每个月/周/天的覆盖度。
+        注意空值的判断逻辑，可根据实际情况调整
         """
         print("get var coverage".center(80, '*'))
         df_copy = self.__df.copy()
         null_value_list = ["NULL", "null", "", np.nan]
-        df_coverage = df_copy.groupby(self.__split_col).apply(lambda x: x[~x[self.__var_name].isin(null_value_list)].shape[0]*1.0 / x.shape[0])
+        df_coverage = df_copy.groupby(self.__split_col).apply(lambda x:
+                                                              x[~x[self.__var_name].isin(null_value_list)][x[self.__var_name].notnull()].shape[0]*1.0 / (x.shape[0]+1e-20))
         return df_coverage
 
     def get_var_quantile(self):
         """
-        计算该特征每个月/周/天的分位数，观察跨月/周/天稳定性，统计的时候排除空值
+        计算该特征每个月/周/天的分位数，观察其跨月/周/天的稳定性。
+        统计的时候排除了空值!!!注意空值的判断逻辑，可以根据实际情况调整。
         """
         print("get var quantile".center(80, '*'))
         # 去掉空值
         df_copy = self.__df[~self.__df[self.__var_name].isin(["NULL", "null", "", np.nan])].copy()
+        df_copy = df_copy[df_copy[self.__var_name].notnull()]  # 注意pandas 中的null，不是np.nan!!!
         # 计算每一分组内的分位数
         df_quantile = df_copy.groupby(self.__split_col).apply(lambda x: self.__cal_quantile(x)).reset_index(level=1, drop=True)
         return df_quantile
@@ -84,59 +89,53 @@ class VarTimeSeq(object):
                 "50%": df[self.__var_name].quantile(0.5),
                 "60%": df[self.__var_name].quantile(0.6),
                 "80%": df[self.__var_name].quantile(0.8),
-                "max": df[self.__var_name].max()
+                "90%": df[self.__var_name].quantile(0.9),
+                "max": df[self.__var_name].max(),
+                "mean": df[self.__var_name].mean()
             }, orient='index').T
 
     def __plot(self, df_result):
-        plt.figure(figsize=(25, 8))
+        print("start plot!")
+        plt.figure(figsize=(20, 8))
         plt.tick_params(labelsize=8)  # tick_params可设置坐标轴刻度值属性
         X = [str(x) for x in df_result.index]
-        # feat quantile
-        plt.subplot(131)
-        for i in ["min", "20%", "40%", "50%", "60%", "80%", "max"]:
-            plt.plot(X, df_result[i], label=i)
-            for a, b in zip(X, df_result[i]):
-                plt.text(a, b, '%s' % (round(b, 3)), ha='center', va='bottom', fontsize=10)  # plt.text 在曲线上显示y值
-        plt.xticks(X, color='black', rotation=45)                                            # 横坐标旋转60度
-        plt.grid(axis='y', color='#8f8f8f', linestyle='--', linewidth=1)                     # 显示网格(如显示y轴的)
-        plt.title('%s quantile' % self.__var_name)
-        plt.xlabel("%s" % self.__var_name)
-        plt.legend()  # 用来显示图例
-        plt.ylabel("quantile")
-        # feat coverage
-        plt.subplot(132)
-        plt.plot(X, df_result["coverage"], label='coverage', color="green")
-        for a, b in zip(X, df_result["coverage"]): plt.text(a, b, '%s' % (round(b, 3)), ha='center', va='bottom', fontsize=10)  # plt.text 在曲线上显示y值
-        plt.xticks(X, color='black', rotation=45)  # 横坐标旋转60度
-        plt.grid(axis='y', color='#8f8f8f', linestyle='--', linewidth=1)  # 显示网格(如显示y轴的)
-        plt.title('%s coverage' % self.__var_name)
-        plt.xlabel("%s" % self.__var_name)
-        plt.ylabel("coverage")
-        plt.legend()  # 用来显示图例
-        # odds
-        plt.subplot(133)
-        plt.plot(X, df_result["odds"], label='odds', color="red")
-        for a, b in zip(X, df_result["odds"]): plt.text(a, b, '%s' % (round(b, 3)), ha='center', va='bottom', fontsize=10)  # plt.text 在曲线上显示y值
-        plt.xticks(X, color='black', rotation=45)  # 横坐标旋转60度
-        plt.grid(axis='y', color='#8f8f8f', linestyle='--', linewidth=1)  # 显示网格(如显示y轴的)
-        plt.title('%s odds' % self.__var_name)
-        plt.xlabel("%s" % self.__var_name)
-        plt.ylabel("odds")
-        plt.legend()  # 用来显示图例
-        path = os.path.join(self.__save_path, self.__var_name+'_coverage_quantile_odds.png')
+        for col,j in zip(["quantile","coverage","odds"],[1,2,3]):
+            plt.subplot(1,3,j)
+            if col == "quantile":
+                for i in ["min", "20%", "40%", "50%", "60%", "80%", "90%", "max", "mean"]:
+            #         plt.plot(list(range(len(X))), df_result[i], label=i) 
+            #         plt.xticks(list(range(len(X))), tuple(X), color='black', rotation=45) # 横坐标旋转60度
+                    plt.plot(X, df_result[i], label=i) 
+                    plt.xticks(X, tuple(X), color='black', rotation=45) # 横坐标旋转60度
+                    for a, b in zip(X, df_result[i]):
+                        plt.text(a, b, '%s' % (round(b, 3)), ha='center', va='bottom', fontsize=10) # plt.text 在曲线上显示y值
+            else:
+            #     plt.plot(list(range(len(X))), df_result[col], label=col, color="green")
+            #     plt.xticks(list(range(len(X))), tuple(X), color='black', rotation=45) # 横坐标旋转60度
+                plt.plot(X, df_result[col], label=col, color="green")
+                plt.xticks(X, color='black', rotation=45) # 横坐标旋转60度
+                for a, b in zip(X, df_result[col]): 
+                    plt.text(a, b, '%s' % (round(b, 3)), ha='center', va='bottom', fontsize=10)  # plt.text 在曲线上显示y值    
+            plt.grid(axis='y', color='#8f8f8f', linestyle='--', linewidth=1)  # 显示网格(如显示y轴的)
+            plt.title('%s_%s' % (self.__var_name, col))
+            plt.xlabel("%s" % self.__split_col)
+            plt.ylabel(col)
+            plt.legend()  # 用来显示图例
+        path = os.path.join(self.__save_path, self.__var_name+'_quantile_coverage_odds.png')
         print("save_path is %s" % path)
         plt.savefig(path)
         plt.close()
-
-
+        
 if __name__ == '__main__':
-    save_path = r"E:\work\2 mission\acard\acard_dae\source\dt0807\plot_feat"
+    save_path = r"./plot_feat"
     
     # load data. 包含label和apply_month
     df_all = pd.read_csv("data.csv")
     # feat_list
-    var_list = [x for x in df_all.columns.tolist() if x not in ["user_id","label","apply_month"]]
+    var_list = [x for x in df_all.columns.tolist() if x not in ["user_id","label","apply_month"]] # 去掉不相关的字段
 
+    # 用来进行分组的字段：时间-月份
+    split_col = 'apply_month'
     for var in var_list:
         print(("feature %s" % var).center(80, '-'))
-        var_time_seq = VarTimeSeq(var_name=var, df=df_all, split_col="apply_month", save_path=save_path)
+        var_time_seq = VarTimeSeq(var_name=var, df=df_all, split_col=split_col, save_path=save_path)
