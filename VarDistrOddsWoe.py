@@ -22,17 +22,17 @@ class VarDistrOddsWoe(object):
         """
         @目的：针对2分类任务的变量分析
         1）分布图：比较2个集合中，同一变量的值分布情况，查看变量的分布是否一致
-        2）odds图：比较2个集合中，同一变量对2类样本的区分能力，查看变量区分能力是否一致
-        3) woe图：
-        :param var_name: variable name
-        :param value_list1: the value_list of the variable
-        :param label_list1: sample label_list, one-to-one correspondence with value_list1. like[1,1,0,0,1,0,0,0,0]
-        :param value_list2: the value_list of the variable
-        :param label_list2: sample label_list, one-to-one correspondence with value_list2
-        :param var_threshold: the number of unique values of this variable
-        :param bins: number of bins
-        :param divide_mode: ="qcut",equal frequency bin; ="cut",equal width bin
-        :param save_path: the path where the distribution histgram is saved
+        2）odds图/woe图：比较2个集合中，同一变量对2类样本的区分能力，查看变量区分能力是否一致
+        3) 计算特征在2个集合中的IV和max(abs(woe))
+        :param var_name: 特征字段名
+        :param value_list1: 集合1中，该特征的特征值
+        :param label_list1: 集合1中，样本标签,与value_list1一一对应，举例[1,1,0,0,1,0,0,0,0]
+        :param value_list2: 集合2中，该特征的特征值
+        :param label_list2: 集合2中，样本标签,与value_list2一一对应，举例[1,1,0,0,1,0,0,0,0]
+        :param var_threshold: 该特征唯一值的个数
+        :param bins: 分箱数
+        :param divide_mode: 分箱模式：="qcut",等频分箱; ="cut",等宽分箱
+        :param save_path: 结果保存路径
         :return:
         """
         self.__var_name = var_name
@@ -46,141 +46,160 @@ class VarDistrOddsWoe(object):
         self.__save_path = save_path
         self.__get_result()
 
-    def __get_result(self):
-        df_distribution = self.get_var_distribution()
-        df_odds = self.get_var_odds()
-        df_woe_iv = self.get_var_woe_iv()
-        df_result = df_distribution.merge(df_odds, left_index=True, right_index=True, how="outer")
-        df_result = df_result.merge(df_woe_iv, left_index=True, right_index=True, how="outer")
-        df_result.to_csv(self.__save_path + '/%s_distribution_odds_woe.csv' % self.__var_name)
-        self.__plot(df_result)
+    def get_result(self):
+        df_distr_bins_cut, df_distr_bins_qcut = self.get_var_distr()
+        df_odds_bins_cut, df_odds_bins_qcut = self.get_var_odds()
+        df_woe_bins_cut, df_woe_bins_qcut = self.get_var_woe()
+        # 合并
+        df_result_cut = df_distr_bins_cut.merge(df_odds_bins_cut, left_index=True, right_index=True, how="outer")
+        df_result_cut = df_result_cut.merge(df_woe_bins_cut, left_index=True, right_index=True, how="outer")
+        df_result_cut.to_csv(self.__save_path + '/%s_distr_odds_woe_bins_cut.csv' % self.__var_name)
+        df_result_qcut = df_distr_bins_qcut.merge(df_odds_bins_qcut, left_index=True, right_index=True, how="outer")
+        df_result_qcut = df_result_qcut.merge(df_woe_bins_qcut, left_index=True, right_index=True, how="outer")
+        df_result_qcut.to_csv(self.__save_path + '/%s_distr_odds_woe_bins_qcut.csv' % self.__var_name)      
+        # 画图
+        self.__plot(df_result_cut, df_result_qcut)
+        return df_result_cut, df_result_qcut
+        
 
-    def get_var_distribution(self):
+    def __divide_var(self):
         """
-        变量频数分布图：对该变量进行分箱，统计每一箱内的频数占比
+        对变量进行分箱：
+        1、为了使得两个集合具有相同的分箱区间，画图的时候方便：将两个集合的该变量值放在一起，再进行分箱；
+        2、区分连续变量和离散变量：如果唯一值的个数>=self.__cnt_threshold，认为是连续变量，否则离散变量；
+        3、连续变量：等宽+等频。离散：每个值单独分一箱
         """
-        print("get var distribution".center(80, '*'))
-        print(("variable %s" % self.__var_name).center(20, '-'))
-        # divide the variable, and group it according to the bins
-        df_with_bins = self.__divide_var()
-        df_groupby = df_with_bins.groupby("bins")
-        result1 = df_groupby.sum()["flag"] * 1.0 / len(self.__value_list1)
-        result2 = (df_groupby.count()["flag"] * 1.0 - df_groupby.sum()["flag"] * 1.0) / len(self.__value_list2)
-        df_distribution = pd.concat([result1, result2], axis=1, keys=["distribution_set1", "distribution_set2"])
-        return df_distribution
+        # 等频分箱
+        def Rank_qcut(var_list, k):
+            quantile = np.array([float(i)*1.0/k for i in list(range(1,k+1))])
+            funBounder = lambda x: (quantile>=x).argmax()
+            return var_list.rank(pct=True).apply(funBounder)
+        
+        value_list = self.__value_list1 + self.__value_list2
+        label_list = self.__label_list1 + self.__label_list2
+        # 添加一个flag，用于区分两个集合: 1 is value_list1, 2 is value_list2
+        flag = list(np.ones(len(self.__value_list1))) + list(np.ones(len(self.__value_list2))*2)
+        df_var = pd.DataFrame({self.__var_name: value_list, "label": label_list, "flag": flag})
+        
+        value_cnt = len(df_var[self.__var_name].unique())
+        print("unique_value_cnt = ", value_cnt)
+        if value_cnt >= self.__cnt_threshold:
+            # 等频分箱
+            #pd.qcut分箱，边界有重复，虽然在较高版本中有duplicates参数可以解决这个问题
+            #但是如果为了删除重复值设置 duplicates=‘drop'，则易出现于分片个数少于指定个数的问题
+            #df_var["bins_qcut"] = pd.qcut(df_var[self.__var_name], q=self.__bins) 
+            df_var["bins_qcut"] = Rank_qcut(df_var[self.__var_name], k=self.__bins) # 自己编写的等频分箱，注意空值分到了0箱里面
+            # 等宽分箱，左闭右开
+            df_var["bins_cut"] = pd.cut(df_var[self.__var_name], bins=self.__bins, right=False, include_lowest=True)
+        else: 
+            df_var["bins_qcut"] = df_var[self.__var_name]
+            df_var["bins_cut"] = df_var[self.__var_name]
+        # df_var = df_var.sort_values(by="bins")
+        print("bins_qcut: ", df_var["bins_qcut"].unique())
+        print("bins_cut: ", df_var["bins_cut"].unique())
+        return df_var
+
+    def get_var_distr(self):
+        """
+        变量频数分布图：对该变量进行分箱（等频+等宽），统计每一箱内的频数占比
+        """
+        print("get var distr".center(40, '_'))
+        df_with_bins = self.__divide_var() # 先分箱（等频+等宽）
+        for mode in ["bins_cut", "bins_qcut"]:
+            result = df_with_bins.groupby(mode).apply(lambda x: (
+                x[x["flag"]==1].shape[0] * 1.0 / (len(self.__value_list1) + 1e-20),
+                x[x["flag"]==2].shape[0] * 1.0 / (len(self.__value_list2) + 1e-20)))
+            result1 = result.map(lambda x: x[0])
+            result2 = result.map(lambda x: x[1])
+            if mode == 'bins_cut':
+                df_distr_bins_cut = pd.concat([result1, result2], axis=1, keys=["distr_set1", "distr_set2"])
+            else:
+                df_distr_bins_qcut = pd.concat([result1, result2], axis=1, keys=["distr_set1", "distr_set2"])
+        return df_distr_bins_cut, df_distr_bins_qcut
 
     def get_var_odds(self):
         """
-        变量odds图：对该变量进行分箱，统计每一箱内的label=1的样本个数/label=0的样本个数
+        变量odds图：对该变量进行分箱（等频+等宽），统计每一箱内的label=1的样本个数/label=0的样本个数
         """
-        print("get var odds".center(80, '*'))
-        print(("variable %s" % self.__var_name).center(80, '-'))
-        df_with_bins = self.__divide_var()
-        df_groupby = df_with_bins.groupby("bins")
-        # set1
-        result = df_groupby.apply(lambda x: (x[(x["flag"] == 1) & (x["label"] == 1)].shape[0], x[(x["flag"] == 1) & (x["label"] == 0)].shape[0]))
-        df_odds1 = result.map(lambda x: x[0]) * 1.0 / (result.map(lambda x: x[1]) + 1e-20)  # 该特征在set1中的分布
-        # set2
-        result = df_groupby.apply(lambda x: (x[(x["flag"] == 0) & (x["label"] == 1)].shape[0], x[(x["flag"] == 0) & (x["label"] == 0)].shape[0]))
-        df_odds2 = result.map(lambda x: x[0]) * 1.0 / (result.map(lambda x: x[1]) + 1e-20)  # 该特征在set2中的分布
-        df_odds = pd.concat([df_odds1, df_odds2], axis=1, keys=["odds_set1", "odds_set2"])  # pd.concat沿着axis=1对series进行合并时，keys会成为合并之后df的列名
-        return df_odds
+        print("get var odds".center(40, '_'))
+        df_with_bins = self.__divide_var() # 先分箱（等频+等宽）
+        for mode in ["bins_cut", "bins_qcut"]:
+            result = df_with_bins.groupby(mode).apply(lambda x: (
+                x[(x["flag"] == 1) & (x["label"] == 1)].shape[0], 
+                x[(x["flag"] == 1) & (x["label"] == 0)].shape[0],
+                x[(x["flag"] == 2) & (x["label"] == 1)].shape[0], 
+                x[(x["flag"] == 2) & (x["label"] == 0)].shape[0]))
+            df_odds1 = result.map(lambda x: x[0]) * 1.0 / (result.map(lambda x: x[1]) + 1e-20)
+            df_odds2 = result.map(lambda x: x[2]) * 1.0 / (result.map(lambda x: x[3]) + 1e-20)
+            # 按列合并：pd.concat沿着axis=1对series进行合并时，keys会成为合并之后df的列名
+            if mode == 'bins_cut':
+                df_odds_bins_cut = pd.concat([df_odds1, df_odds2], axis=1, keys=["odds_set1", "odds_set2"])
+            else:
+                df_odds_bins_qcut = pd.concat([df_odds1, df_odds2], axis=1, keys=["odds_set1", "odds_set2"])
+        return df_odds_bins_cut, df_odds_bins_qcut
 
-    # 计算woe\IV值
-    def get_var_woe_iv(self):
-        print("get var woe_iv".center(80, '*'))
-        print(("variable %s" % self.__var_name).center(80, '-'))
-        df_with_bins = self.__divide_var()
-        df_groupby = df_with_bins.groupby("bins")
-        # set1
-        total_bad_cnt = df_with_bins[df_with_bins["flag"] == 1]["label"].sum()
-        total_good_cnt = df_with_bins[df_with_bins["flag"] == 1].shape[0] - total_bad_cnt
-        df_woe_iv = df_groupby.apply(lambda x: self._cal_woe_tmp(x[x["flag"] == 1], total_bad_cnt, total_good_cnt)).reset_index(level=1, drop=True)
-        df_woe_iv["woe"] = np.log(df_woe_iv["bad_rate"] * 1.0 / (df_woe_iv["good_rate"] + 10e-20))
-        df_woe_iv["iv"] = (df_woe_iv["bad_rate"] - df_woe_iv["good_rate"]) * df_woe_iv["woe"]
-        df_woe_iv.columns = [x + '_set1' for x in df_woe_iv.columns]
-        # set2
-        total_bad_cnt = df_with_bins[df_with_bins["flag"] == 0]["label"].sum()
-        total_good_cnt = df_with_bins[df_with_bins["flag"] == 0].shape[0] - total_bad_cnt
-        result = df_groupby.apply(lambda x: self._cal_woe_tmp(x[x["flag"] == 0], total_bad_cnt, total_good_cnt)).reset_index(level=1, drop=True)
-        result["woe"] = np.log(result["bad_rate"] * 1.0 / (result["good_rate"] + 10e-20))
-        result["iv"] = (result["bad_rate"] - result["good_rate"]) * result["woe"]
-        result.columns = [x + '_set2' for x in result.columns]
-        df_woe_iv = df_woe_iv.merge(result, left_index=True, right_index=True, how="outer")
-        return df_woe_iv
+    def get_var_woe(self):
+        """
+        变量每一个分箱的woe/iv值：对该变量进行分箱（等频+等宽），计算每一箱内的woe/iv
+        """
+        print("get var woe".center(40, '_'))
+        df_with_bins = self.__divide_var() # 先分箱（等频+等宽）
+        for mode in ["bins_cut", "bins_qcut"]:
+            for flag in [1,2]: # 对于两个集合
+                total_p_cnt = df_with_bins[(df_with_bins["flag"] == flag)&(df_with_bins["label"]==1)].shape[0]
+                total_n_cnt = df_with_bins[(df_with_bins["flag"] == flag)&(df_with_bins["label"]==0)].shape[0]
+                df_result = df_with_bins.groupby(mode).apply(lambda x: self._cal_woe_tmp(x[x["flag"] == flag], total_p_cnt, total_n_cnt)).reset_index(level=1, drop=True)
+                df_result["woe"] = np.log(df_result["p_rate"] * 1.0 / (df_result["n_rate"] + 1e-20))
+                df_result["iv"] = (df_result["p_rate"] - df_result["n_rate"]) * df_result["woe"]
+                df_result.columns = [x+'_set'+str(flag) for x in df_result.columns]
+                if flag == 1:
+                    df_woe_set1 = df_result
+                else:
+                    df_woe_set2 = df_result
+            if mode == 'bins_cut':
+                df_woe_bins_cut = df_woe_set1.merge(df_woe_set2,left_index=True,right_index=True, how="outer")
+            else:
+                df_woe_bins_qcut = df_woe_set1.merge(df_woe_set2,left_index=True, right_index=True, how="outer")
+        return df_woe_bins_cut,df_woe_bins_qcut
 
     @staticmethod
-    def _cal_woe_tmp(df, total_bad_cnt, total_good_cnt):
-        # 计算IV值的时候，分组计算，存储中间值
+    def _cal_woe_tmp(df, total_p_cnt, total_n_cnt):
+        # 计算IV值的时候，分箱计算，存储中间值
         return pd.DataFrame.from_dict(
             {
-                "bad_cnt": df["label"].sum(),
-                "total_bad_cnt": total_bad_cnt,
-                "bad_rate": df["label"].sum() * 1.0 / total_bad_cnt,  # 该分组内坏样本/总坏样本
-                "good_cnt": df[df["label"] == 0].shape[0],
-                "total_good_cnt": total_good_cnt,
-                "good_rate": df[df["label"] == 0].shape[0] * 1.0 / total_good_cnt  # 该分组内好样本/总好样本
+                "total_p_cnt": total_p_cnt,
+                "total_n_cnt": total_n_cnt,
+                "p_cnt": df[df["label"] == 1].shape[0],
+                "p_rate": df[df["label"] == 1].shape[0] * 1.0 / (total_p_cnt + 1e-20), # 该箱内坏样本/总坏样本
+                "n_cnt": df[df["label"] == 0].shape[0],
+                "n_rate": df[df["label"] == 0].shape[0] * 1.0 / (total_n_cnt + 1e-20), # 该箱内好样本/总好样本
             }, orient='index').T
 
-    def __divide_var(self):
-        # 为了使得两个集合具有相同的分箱区间，画图的时候方便：将两个集合的变量值放在一起，再进行分箱
-        value_list = self.__value_list1 + self.__value_list2
-        label_list = self.__label_list1 + self.__label_list2
-        # add a flag to distinguish two list: 1 is value_list1, 0 is value_list2
-        flag = list(np.ones(len(self.__value_list1))) + list(np.zeros(len(self.__value_list2)))
-        df_var = pd.DataFrame({self.__var_name: value_list, "label": label_list, "flag": flag})
 
-        # the number of unique values for this variable
-        value_cnt = len(set(df_var[self.__var_name]))
-        if value_cnt >= self.__cnt_threshold:  # 如果变量值的个数>=threshold个，当做连续变量来处理
-            if self.__divide_mode == 'qcut':   # 等频分箱
-                df_var["bins"] = pd.qcut(df_var[self.__var_name], self.__bins, duplicates="drop")
-            elif self.__divide_mode == 'cut':  # 等宽分箱，左闭右开
-                df_var["bins"] = pd.cut(df_var[self.__var_name], self.__bins, duplicates="drop", right=False, include_lowest=True)
-        else:  # 如果变量值的个数<threshold个,当做离散变量来处理，每一个值当做一箱
-            df_var["bins"] = df_var[self.__var_name]
-        df_var = df_var.sort_values(by="bins")
-        print("bins: ", df_var["bins"].unique())
-        return df_var
-
-    def __plot(self, df_result):
-        plt.figure(figsize=(20, 8))
+    def __plot(self, df_result_cut, df_result_qcut):
+        plt.figure(figsize=(20, 15))
         plt.tick_params(labelsize=8)  # tick_params可设置坐标轴刻度值属性
-        X = [str(x) for x in df_result.index]
-        # feat distribution
-        plt.subplot(131)
-        plt.bar(X, df_result["distribution_set1"], label='distribution_set1', width=0.5, bottom=0, facecolor='blue', alpha=0.5)
-        plt.bar(X, df_result["distribution_set2"], label='distribution_set2', width=0.5, bottom=0, facecolor='red', alpha=0.5)
-        plt.xticks(X, color='black', rotation=45)  # 横坐标旋转60度
-        plt.title('%s distribution' % self.__var_name)
-        plt.xlabel("%s" % self.__var_name)
-        plt.legend()  # 用来显示图例
-        plt.ylabel("distribution")
-        # feat odds
-        plt.subplot(132)
-        plt.plot(X, df_result["odds_set1"], label='odds_set1', color="blue")
-        plt.plot(X, df_result["odds_set2"], label='odds_set2', color="red")
-        plt.xticks(X, color='black', rotation=45)  # 横坐标旋转60度
-        plt.title('%s odds=bad/good' % self.__var_name)
-        plt.xlabel("%s" % self.__var_name)
-        plt.ylabel("odds")
-        plt.legend()  # 用来显示图例
-        # woe
-        plt.subplot(133)
-        plt.plot(X, df_result["woe_set1"], label='woe_set1', color="blue")
-        plt.bar(X, df_result["woe_set1"], width=0.5, bottom=0, facecolor='blue', alpha=0.5)
-        plt.plot(X, df_result["woe_set2"], label='woe_set2', color="red")
-        plt.bar(X, df_result["woe_set2"], width=0.5, bottom=0, facecolor='red', alpha=0.5)
-        plt.xticks(X, color='black', rotation=45)  # 横坐标旋转60度
-        plt.title('%s woe' % self.__var_name)
-        plt.xlabel("%s" % self.__var_name)
-        plt.ylabel("woe")
-        plt.legend()  # 用来显示图例
+        for df_result,i in zip([df_result_cut, df_result_qcut], [0,3]):
+            X = [str(x) for x in df_result.index]
+            for col,j in zip(["distr","odds","woe"],[i+1,i+2,i+3]):
+                plt.subplot(2,3,j)
+                col1 = col+"_set1"
+                col2 = col+"_set2"
+                plt.bar(list(range(len(X))), df_result[col1],
+                        label=col1,width=0.5, bottom=0, facecolor='blue', alpha=0.5)
+                plt.plot(list(range(len(X))), df_result[col1], label=col1, color="blue")
+                plt.bar(list(range(len(X))), df_result[col2], 
+                        label=col2, width=0.5, bottom=0, facecolor='red', alpha=0.5)
+                plt.plot(list(range(len(X))), df_result[col2], label=col2, color="red")
+                plt.xticks(list(range(len(X))), tuple(X), color='black', rotation=45) # 横坐标旋转
+                plt.title('%s_%s' % (self.__var_name, col))
+                plt.xlabel("%s" % self.__var_name)
+                plt.ylabel(col)
+                plt.legend()  # 用来显示图例
         path = os.path.join(self.__save_path, self.__var_name+'.png')
         print("save_path is %s" % path)
         plt.savefig(path)
         plt.close()
-
 
 if __name__ == '__main__':
      # test
@@ -192,14 +211,16 @@ if __name__ == '__main__':
     # feat_list
     var_list = df1.columns.tolist()
     
+    # 参数
     var_threshold = 30  # 当unique(特征值)的个数<50的时候，该变量当做离散变量处理
     bins = 10  # 分成30箱
     divide_mode = "qcut"  # 分箱模式："cut"等宽，"qcut"等频
     for var in var_list:
-        # 去掉空值
-        df_sub1 = df1[df1[var].notnull()]
-        df_sub2 = df2[df2[var].notnull()]
-        variabledistribution = VarDistrOddsWoe(var_name=var, value_list1=df_sub1[var].tolist(),
-                                           label_list1=df_sub1["label"].tolist(), value_list2=df_sub2[var].tolist(),
-                                           label_list2=df_sub2["label"].tolist(), var_threshold=var_threshold, bins=bins,
-                                           divide_mode=divide_mode, save_path=save_path)
+        variabledistribution = VarDistrOddsWoe(
+            var_name=var,
+            value_list1=df_sub1[var].tolist(),label_list1=df_sub1["label"].tolist(), 
+            value_list2=df_sub2[var].tolist(),label_list2=df_sub2["label"].tolist(), 
+            var_threshold=var_threshold, 
+            bins=bins,
+            divide_mode=divide_mode,
+            save_path=save_path)
