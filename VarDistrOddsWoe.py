@@ -31,10 +31,11 @@ class VarDistrOddsWoe(object):
         :param label_list2: 集合2中，样本标签,与value_list2一一对应，举例[1,1,0,0,1,0,0,0,0]
         :param var_threshold: 该特征唯一值的个数
         :param bins: 分箱数
-        :param divide_mode: 分箱模式：="qcut",等频分箱; ="cut",等宽分箱
         :param save_path: 结果保存路径
         :return:
         """
+        if len(value_list1) != len(label_list1):
+            raise ValueError("len(value) and len(label) was not same, please check")
         self.__var_name = var_name
         self.__value_list1 = value_list1
         self.__label_list1 = label_list1
@@ -42,7 +43,6 @@ class VarDistrOddsWoe(object):
         self.__label_list2 = label_list2
         self.__cnt_threshold = var_threshold
         self.__bins = bins
-        self.__divide_mode = divide_mode
         self.__save_path = save_path
         self.__get_result()
 
@@ -212,9 +212,8 @@ if __name__ == '__main__':
     var_list = df1.columns.tolist()
     
     # 参数
-    var_threshold = 30  # 当unique(特征值)的个数<50的时候，该变量当做离散变量处理
-    bins = 10  # 分成30箱
-    divide_mode = "qcut"  # 分箱模式："cut"等宽，"qcut"等频
+    var_threshold = 30  # 当unique(特征值)的个数<30的时候，该变量当做离散变量处理
+    bins = 10  # 分成10箱.下面的程序里，等宽分箱和等频分箱都有
     for var in var_list:
         variabledistribution = VarDistrOddsWoe(
             var_name=var,
@@ -222,5 +221,4 @@ if __name__ == '__main__':
             value_list2=df_sub2[var].tolist(),label_list2=df_sub2["label"].tolist(), 
             var_threshold=var_threshold, 
             bins=bins,
-            divide_mode=divide_mode,
             save_path=save_path)
