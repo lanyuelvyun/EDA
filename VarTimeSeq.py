@@ -44,8 +44,8 @@ class VarTimeSeq(object):
         df_result = pd.concat([df_quantile, df_coverage, df_odds], axis=1, join='outer')  # 按照列进行拼接
         df_result.rename(columns={0: "coverage", 1: "odds"}, inplace=True)
 
-        df_result.to_csv(os.path.join(self.__save_path ,'%_quantile_coverage_odds.csv' % self.__var_name),index=True,encoding="utf-8")
-        print(os.path.join(self.__save_path ,'%_quantile_coverage_odds.csv' % self.__var_name))
+        df_result.to_csv(self.__save_path + '/%s_quantile_coverage_odds.csv' % self.__var_name, index=True,encoding="utf-8")
+        print(self.__save_path + '/%s_quantile_coverage_odds.csv' % self.__var_name)
         self.__plot(df_result)
 
     def get_var_odds(self):
