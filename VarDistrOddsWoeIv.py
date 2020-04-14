@@ -151,6 +151,8 @@ class VarDistrOddsWoe(object):
                 df_result = df_with_bins.groupby(mode).apply(lambda x: self._cal_woe_tmp(x[x["flag"] == flag], total_p_cnt, total_n_cnt)).reset_index(level=1, drop=True)
                 df_result["woe"] = np.log(df_result["p_rate"] * 1.0 / (df_result["n_rate"] + 1e-20))
                 df_result["iv"] = (df_result["p_rate"] - df_result["n_rate"]) * df_result["woe"]
+                df_result["sum_iv"] = df_result["iv"].sum()
+                df_result["max_abs_woe"] = max(df_result["woe"].tolist(), key=abs)
                 df_result.columns = [x+'_set'+str(flag) for x in df_result.columns]
                 if flag == 1:
                     df_woe_set1 = df_result
