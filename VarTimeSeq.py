@@ -12,9 +12,12 @@ plt.rcParams['font.sans-serif'] = ['SimHei']  # 替换sans-serif字体为黑体
 plt.rcParams['axes.unicode_minus'] = False    # 解决坐标轴负数的负号显示问题
 plt.rcParams['savefig.dpi'] = 150
 plt.rcParams['figure.dpi'] = 150
-import sys
-reload(sys)
-sys.setdefaultencoding('utf-8')
+try:
+    import sys
+    reload(sys)
+    sys.setdefaultencoding('utf-8')
+except:
+    pass
 
 class VarTimeSeq(object):
     def __init__(self, var_name, df, split_col, save_path):
