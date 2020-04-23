@@ -193,7 +193,13 @@ class VarDistrOddsWoe(object):
                 plt.bar(list(range(len(X))), df_result[col2], 
                         label=col2, width=0.5, bottom=0, facecolor='red', alpha=0.5)
                 plt.plot(list(range(len(X))), df_result[col2], label=col2, color="red")
-                plt.xticks(list(range(len(X))), tuple(X), color='black', rotation=45) # 横坐标旋转
+                # 在曲线上显示Y值
+                for a, b in zip(X, df_result[col1]):
+                    plt.text(a, b, '%s' % (round(b, 3)), ha='center', va='bottom', fontsize=10) # plt.text 在曲线上显示y值
+                for a, b in zip(X, df_result[col2]):
+                    plt.text(a, b, '%s' % (round(b, 3)), ha='center', va='bottom', fontsize=10) # plt.text 在曲线上显示y值
+                # 横坐标旋转
+                plt.xticks(list(range(len(X))), tuple(X), color='black', rotation=45) 
                 plt.title('%s_%s' % (self.__var_name, col))
                 plt.xlabel("%s" % self.__var_name)
                 plt.ylabel(col)
