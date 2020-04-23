@@ -22,10 +22,10 @@ except:
 class VarTimeSeq(object):
     def __init__(self, var_name, df, split_col, save_path):
         """
-        @目的：针对2分类任务的变量【时序性】分析，下面三张图要结合在一起看，单独看不全面！
-        1）分位数分布图：用时间进行分箱，粒度可以是月/周/天，查看每月/周/天 该特征的分位数
-        2）覆盖率分布图：用时间进行分箱，粒度可以是月/周/天，查看每月/周/天 该特征的覆盖率
-        3) odds图：用时间进行分箱，粒度可以是月/周/天，查看每月/周/天 的逾期率
+        @目的：针对2分类任务的变量【时序稳定性】分析，下面三张图要结合在一起看，单独看不全面！
+        1）分位数分布图：用时间进行分箱，粒度可以是月/周/天，查看每箱内该特征的分位数
+        2）覆盖率分布图：用时间进行分箱，粒度可以是月/周/天，查看每箱内该特征的覆盖率
+        3) odds图：用时间进行分箱，粒度可以是月/周/天，查看每箱内的逾期率
         :param var_name: 特征名称
         :param df: 包含特征var_name和label的dataframe
         :param split_col: 用来进行分箱的列，一般是时间，粒度可以是月/周/天
@@ -52,38 +52,37 @@ class VarTimeSeq(object):
         
     def get_var_distr(self):
         """
-        变量频数分布图：对该变量进行分箱（等频+等宽），统计每一箱内的频数占比
+        变量频数分布：用时间对该变量进行分箱，统计每一箱内的样本频数占比
         """
         print("get var distr".center(80, '*'))
         df_copy = self.__df.copy()
         df_distr = df_copy.groupby(self.__split_col).apply(lambda x: x.shape[0]*1.0 / (df_copy.shape[0]+1e-20))
         return df_distr 
-
+        
+        
     def get_var_odds(self):
         """
-        变量odds图：对该变量进行分箱，统计每一箱内的label=1的样本个数/label=0的样本个数
+        变量odds：用时间对该变量进行分箱，统计每一箱内的label=1的样本个数/label=0的样本个数
         """
-        print("get var odds".center(80, '*'))
+        print("get var odds".center(80,'*'))
         df_copy = self.__df.copy()
         df_odds = df_copy.groupby(self.__split_col).apply(lambda x: x["label"].sum()*1.0 / (x[x["label"] == 0].shape[0]+1e-20))
         return df_odds
 
     def get_var_coverage(self):
         """
-        计算该特征每个月/周/天的覆盖度。
-        注意空值的判断逻辑，可根据实际情况调整
+        变量覆盖度：用时间对该变量进行分箱，统计每一箱内该变量的覆盖度。（ps：注意空值的判断逻辑，可根据实际情况调整）
         """
         print("get var coverage".center(80, '*'))
         df_copy = self.__df.copy()
         null_value_list = ["NULL", "null", "", np.nan]
-        df_coverage = df_copy.groupby(self.__split_col).apply(lambda x:
-                                                              x[~x[self.__var_name].isin(null_value_list)][x[self.__var_name].notnull()].shape[0]*1.0 / (x.shape[0]+1e-20))
+        df_coverage = df_copy.groupby(self.__split_col).apply(lambda x: x[~x[self.__var_name].isin(null_value_list)][x[self.__var_name].notnull()].shape[0]*1.0 / (x.shape[0]+1e-20))
         return df_coverage
 
     def get_var_quantile(self):
         """
-        计算该特征每个月/周/天的分位数，观察其跨月/周/天的稳定性。
-        统计的时候排除了空值!!!注意空值的判断逻辑，可以根据实际情况调整。
+        变量各分位数：用时间对该变量进行分箱，统计每一箱内的各个分位数，观察其跨时间稳定性。
+        （ps：统计的时候排除了空值!!!注意空值的判断逻辑，可以根据实际情况调整。
         """
         print("get var quantile".center(80, '*'))
         # 去掉空值
@@ -132,7 +131,7 @@ class VarTimeSeq(object):
                     plt.xticks(X, tuple(X), color='black', rotation=45) # 横坐标旋转60度
                     for a, b in zip(X, df_result[i]): 
                         plt.text(a, b, '%s' % (round(b, 3)), ha='center', va='bottom', fontsize=10)  # plt.text 在曲线上显示y值    
-            plt.grid(axis='y', color='#8f8f8f', linestyle='--', linewidth=1)  # 显示网格(如显示y轴的)
+            plt.grid(axis='y', color='#8f8f8f', linestyle='--', linewidth=1)  # 显示网格
             plt.title('%s_%s' % (self.__var_name, col))
             plt.xlabel("%s" % self.__split_col)
             plt.ylabel(col)
