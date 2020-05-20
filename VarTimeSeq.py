@@ -18,10 +18,11 @@ except:
 class VarTimeSeq(object):
     def __init__(self, var_name, df, split_col, save_path):
         """
-        @目的：针对2分类任务的变量【时序性】分析，下面三张图要结合在一起看，单独看不全面！
-        1）分位数分布图：进行分箱，粒度可以是月/周/天，查看每月/周/天 该特征的分位数
-        2）覆盖率分布图：进行分箱，粒度可以是月/周/天，查看每月/周/天 该特征的覆盖率
-        3) odds图：进行分箱，粒度可以是月/周/天，查看每月/周/天 的逾期率
+        @目的：针对2分类任务的变量【时序性】分析，下面几张图要结合在一起看，单独看不全面！
+        1）分位数分布图：查看每箱内，该特征的分位数
+        2）覆盖率分布图：查看每箱内，该特征的覆盖率
+        3) odds图：查看每箱内的odds
+        4）psi分布图：以第一箱为基准集，后面每一箱为test集，计算psi（去掉空值之后再计算psi）
         :param var_name: 特征名称
         :param df: 包含特征var_name和label的dataframe
         :param split_col: 用来进行分箱的列，一般是时间，粒度可以是月/周/天
@@ -202,7 +203,7 @@ if __name__ == '__main__':
 
     # 找到用来分箱的变量：'split_time'
     df['split_time'] = df['apply_month']
-    # 前N箱合并成一个: 以 前N箱作为基准集，其余作为test集，计算PSI
+    # 前N箱合并成一个
     N = 2
     time_list = sorted(df['split_time'].unique())
     df['split_time'] = df['split_time'].apply(lambda x: str(time_list[0])+'~'+str(time_list[N-1]) if x in time_list[0:N] else x)
