@@ -108,7 +108,8 @@ class VarTimeSeq(object):
     
     def get_var_auc(self):
         """
-        变量的跨月表现AUC/KS：用时间对该变量进行分箱，计算每一箱内特征的AUC/KS（不去掉空值样本）
+        变量的跨月表现AUC/KS：用时间对该变量进行分箱，计算每一箱内特征的AUC/KS（不去掉空值样本）.
+        注意，此计算AUC的方法是，用每箱样本单独训练一个模型，然后计算该模型分的AUC，当每箱内样本少的时候，此计算方法不太准确
         """        
         print("get var bins_auc".center(80, '*'))        
         df_copy = self.__df[[self.__var, self.__label,self.__split_col]]
