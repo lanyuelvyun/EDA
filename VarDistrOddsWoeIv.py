@@ -172,9 +172,9 @@ class VarDistrOddsWoe(object):
                 "total_p_cnt": total_p_cnt,
                 "total_n_cnt": total_n_cnt,
                 "p_cnt": df[df["label"] == 1].shape[0],
-                "p_rate": df[df["label"] == 1].shape[0] * 1.0 / (total_p_cnt + 1e-20), # 该箱内坏样本/总坏样本
+                "p_rate": (df[df["label"] == 1].shape[0] + 1e-20) * 1.0 / (total_p_cnt + 1e-20), # 该箱内坏样本/总坏样本
                 "n_cnt": df[df["label"] == 0].shape[0],
-                "n_rate": df[df["label"] == 0].shape[0] * 1.0 / (total_n_cnt + 1e-20), # 该箱内好样本/总好样本
+                "n_rate": (df[df["label"] == 0].shape[0] + 1e-20) * 1.0 / (total_n_cnt + 1e-20), # 该箱内好样本/总好样本
             }, orient='index').T
 
 
