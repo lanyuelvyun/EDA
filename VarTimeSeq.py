@@ -162,6 +162,7 @@ class VarTimeSeq(object):
         # 一定要copy，不能在原始的上面进行删改！！！！！
         df_copy = self.__df[[self.__var, self.__label,self.__split_col]]
         print('df_ori.shape = ', df_copy.shape)
+        
         # 将第一箱，作为base集 
         df_base = df_copy[df_copy[self.__split_col] == sorted(df_copy[self.__split_col].unique(), reverse=True)[0]]
         print('df_base.shape = ', df_base.shape)      
@@ -173,6 +174,11 @@ class VarTimeSeq(object):
         for i in np.arange(0, 1.1, 1.0/bins_num): # 
             bins_list.append(df_base[self.__var].quantile(q=i))
         bins_list = sorted(list(set(bins_list)))  # 注意去掉相同的边界！！！
+        # 由于边界值需要被包含在内，所以最大最小值分别处理一下
+        min = bins_list[0] - 1e-20
+        max = bins_list[-1] + 1e-20
+        bins_list = [min] + bins_list[1:-1] + [max]
+        # 分箱
         df_base["bins"] = pd.cut(df_base[self.__var], bins=bins_list, duplicates='drop') # 注意去掉相同的边界！！！
         # 计算各分箱内占比
         df_base_result = df_base.groupby("bins").apply(lambda x: x.shape[0]*1.0 / (df_base.shape[0]+1e-20))
