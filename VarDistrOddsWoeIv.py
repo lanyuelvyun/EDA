@@ -186,7 +186,7 @@ if __name__ == '__main__':
     # 保存整体iv值
     df_iv = pd.DataFrame(columns={'var_name','iv','max_abs_woe'})
     df_iv['var_name'] = feat_list
-    for var in ['msg_loan_cnt_receive_top_a_sum_pt_avg_7d']:
+    for var in feat_list:
         print((" var =   %s" % var).center(80, '*'))
         if len(df[var].unique())>=3: # 除去这种类型的特征：[1，1，1，nan,1,1] 和[1,1,1,1,1]
             var_instance = VarDistrOddsWoeIv.VarDistrOddsWoeIv(
