@@ -55,9 +55,11 @@ class VarDistrOddsWoeIv(object):
     def divide_var(self):
         """
         对变量进行分箱：
-        1、区分连续变量和离散变量：如果该变量唯一值的个数>=self.cnt_threshold，认为是连续变量，否则离散变量；
-        2、连续变量：等宽+等频分箱；
-        3、离散：每个值单独分一箱；
+        1、自定义分箱：传入自定义cutoff_list
+        2、自动分箱：区分连续变量和离散变量：如果该变量唯一值的个数>=self.cnt_threshold，认为是连续变量，否则离散变量；
+        1）连续变量：等宽/等频分箱；
+        2）离散：每个值单独分一箱；
+        3）空值单独分一箱;
         """        
         df_var = pd.DataFrame({self.var_name: self.value_list, "label": self.label_list})
         unique_value_cnt = len(df_var[self.var_name].unique())
@@ -65,15 +67,15 @@ class VarDistrOddsWoeIv(object):
 
         # 确定分箱区间
         if self.bins_list is not None: # 如果传入了自定义的分箱cutoff_list
-            print(f"变量正在进行自定义分箱...")
+            print(f"自定义分箱(左开右闭)...")
             bins_list = sorted(set(self.bins_list)) # 去重排序
             #bins_list[0] = bins_list[0] - 1e-20 # 最小值额外减去一个极小数，为了能包含原bins的最小值
         elif unique_value_cnt < self.cnt_threshold:
-            print(f"该变量的唯一值个数({unique_value_cnt}) < 阈值({self.cnt_threshold})，被认为是类别变量。每个值单独分一箱...")
+            print(f"类别变量【该变量的唯一值个数({unique_value_cnt}) < 阈值({self.cnt_threshold})】。每个值单独分一箱...")
             bins_list = sorted(df_var_notnull[self.var_name].unique()) # 去掉空值
             bins_list = [bins_list[0] - 1e-20] + bins_list # 左侧额外加一个值，为了能包含原bins的最小值
         elif unique_value_cnt >= self.cnt_threshold and self.bins_mode == 'cut': 
-            print(f"该变量的唯一值个数({unique_value_cnt}) >= 阈值({self.cnt_threshold})，被认为是连续变量。现在进行的是等宽分箱...")
+            print(f"连续变量【该变量的唯一值个数({unique_value_cnt}) >= 阈值({self.cnt_threshold})】。等宽分箱(左开右闭)...")
             min_value = df_var_notnull[self.var_name].min()
             max_value = df_var_notnull[self.var_name].max()
             step = (max_value - min_value)*1.0 / self.bins_num # 去掉空值求等宽cutoff
@@ -81,7 +83,7 @@ class VarDistrOddsWoeIv(object):
             bins_list = sorted(set(bins_list)) # 去重排序
             bins_list[0] = bins_list[0] - 1e-20 # 最小值额外减去一个极小数，为了能包含原bins的最小值
         elif unique_value_cnt >= self.cnt_threshold and self.bins_mode == 'qcut':  
-            print(f"该变量的唯一值个数({unique_value_cnt}) >= 阈值({self.cnt_threshold})，被认为是连续变量。现在进行的是等频分箱...")
+            print(f"连续变量【该变量的唯一值个数({unique_value_cnt}) >= 阈值({self.cnt_threshold})】。等频分箱(左开右闭)...")
             step = 1.0 / self.bins_num
             bins_list = [df_var_notnull[self.var_name].quantile(i) for i in np.arange(0, 1+step, step)] # 去掉空值求等频cutoff
             bins_list = sorted(set(bins_list))
