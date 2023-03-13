@@ -21,7 +21,7 @@ except:
 
 
 class VarDistrOddsWoeIv(object):
-    def __init__(self, var_name, value_list, label_list, cnt_threshold, bins_mode, bins_num, bins_list, save_path):
+    def __init__(self, var_name, value_list, label_list, cnt_threshold, bins_mode, bins_num, cutoff_list, save_path):
         """
         @目的：对2分类任务的变量，进行分箱分析
         1）对变量进行分箱，分箱方式支持：等宽、等频、自定义分箱；
@@ -35,21 +35,21 @@ class VarDistrOddsWoeIv(object):
         self.var_name = var_name # 变量名称
         self.value_list = value_list # 变量的值
         self.label_list = label_list # 二分类label_list, 与value_list是一一对应的，示例[1,1,0,0,1,0,0]
-        self.cnt_threshold = cnt_threshold # 变量唯一值个数的阈值。该变量的唯一值个数>cnt_threshold，被认为是连续变量，否则被认为是离散变量
-        self.bins_mode = bins_mode # 分箱方法，其值有：'cut'代表等宽分箱；'qcut'代表等频分箱；
-        self.bins_num = bins_num # 分箱个数。搭配bins_mode一起使用
-        self.bins_list = bins_list # 自定义分箱cutoff_list，跟参数(bins_mode+bins_num)的组合不能同时使用，只能用其一。如果该值不为空，会优先使用该分箱方法
+        self.cnt_threshold = cnt_threshold # 变量唯一值个数的阈值。该变量的唯一值个数>cnt_threshold，被认为是连续变量，否则离散变量
+        self.bins_mode = bins_mode # 分箱方法，='cut'代表等宽分箱，='qcut'代表等频分箱
+        self.bins_num = bins_num # 分箱个数。搭配cnt_threshold+bins_mode一起使用
+        self.cutoff_list = cutoff_list # 自定义分箱的切分点cutoff_list，如果该值不为空，会优先使用该分箱方法，此时参数bins_num+bing_mode失效
         self.save_path = save_path
 
         
     def get_result(self):
-        df_distr, bins_list = self.get_var_distr()
-        df_rate, bins_list = self.get_var_positiveRate()
-        df_woe, bins_list = self.get_var_woe()
+        df_distr, cutoff_list = self.get_var_distr()
+        df_rate, cutoff_list = self.get_var_positiveRate()
+        df_woe, cutoff_list = self.get_var_woe()
         # 合并
         df_result = df_distr.merge(df_rate, on='bins', how="outer").merge(df_woe, on='bins', how="outer")
         #df_result.to_csv(self.save_path + '/%s_distrWoePositiveRate_bins.csv' % self.var_name, index=None)    
-        return df_result, bins_list
+        return df_result, cutoff_list
         
 
     def divide_var(self):
@@ -66,39 +66,39 @@ class VarDistrOddsWoeIv(object):
         df_var_notnull = df_var[df_var[self.var_name].notnull()] # 去掉空值之后的数据
 
         # 确定分箱区间
-        if self.bins_list is not None: # 如果传入了自定义的分箱cutoff_list
+        if self.cutoff_list is not None: # 如果传入了自定义的分箱cutoff_list
             print(f"自定义分箱(左开右闭)...")
-            bins_list = sorted(set(self.bins_list)) # 去重排序
-            #bins_list[0] = bins_list[0] - 1e-20 # 最小值额外减去一个极小数，为了能包含原bins的最小值
+            cutoff_list = sorted(set(self.cutoff_list)) # 去重排序
+            #cutoff_list[0] = cutoff_list[0] - 1e-20 # 最小值额外减去一个极小数，为了能包含原bins的最小值
         elif unique_value_cnt < self.cnt_threshold:
             print(f"类别变量【该变量的唯一值个数({unique_value_cnt}) < 阈值({self.cnt_threshold})】。每个值单独分一箱...")
-            bins_list = sorted(df_var_notnull[self.var_name].unique()) # 去掉空值
-            bins_list = [bins_list[0] - 1e-20] + bins_list # 左侧额外加一个值，为了能包含原bins的最小值
+            cutoff_list = sorted(df_var_notnull[self.var_name].unique()) # 去掉空值
+            cutoff_list = [cutoff_list[0] - 1e-20] + cutoff_list # 左侧额外加一个值，为了能包含原bins的最小值
         elif unique_value_cnt >= self.cnt_threshold and self.bins_mode == 'cut': 
             print(f"连续变量【该变量的唯一值个数({unique_value_cnt}) >= 阈值({self.cnt_threshold})】。等宽分箱(左开右闭)...")
             min_value = df_var_notnull[self.var_name].min()
             max_value = df_var_notnull[self.var_name].max()
             step = (max_value - min_value)*1.0 / self.bins_num # 去掉空值求等宽cutoff
-            bins_list = list(np.arange(min_value, max_value+step, step))
-            bins_list = sorted(set(bins_list)) # 去重排序
-            bins_list[0] = bins_list[0] - 1e-20 # 最小值额外减去一个极小数，为了能包含原bins的最小值
+            cutoff_list = list(np.arange(min_value, max_value+step, step))
+            cutoff_list = sorted(set(cutoff_list)) # 去重排序
+            cutoff_list[0] = cutoff_list[0] - 1e-20 # 最小值额外减去一个极小数，为了能包含原bins的最小值
         elif unique_value_cnt >= self.cnt_threshold and self.bins_mode == 'qcut':  
             print(f"连续变量【该变量的唯一值个数({unique_value_cnt}) >= 阈值({self.cnt_threshold})】。等频分箱(左开右闭)...")
             step = 1.0 / self.bins_num
-            bins_list = [df_var_notnull[self.var_name].quantile(i) for i in np.arange(0, 1+step, step)] # 去掉空值求等频cutoff
-            bins_list = sorted(set(bins_list))
-            bins_list[0] = bins_list[0] - 1e-20 
+            cutoff_list = [df_var_notnull[self.var_name].quantile(i) for i in np.arange(0, 1+step, step)] # 去掉空值求等频cutoff
+            cutoff_list = sorted(set(cutoff_list))
+            cutoff_list[0] = cutoff_list[0] - 1e-20 
                
         # 分箱 
-        df_var["bins"], bins_list = pd.cut(df_var[self.var_name], bins=bins_list, 
+        df_var["bins"], cutoff_list = pd.cut(df_var[self.var_name], bins=cutoff_list, 
                                 include_lowest=False, right=True, # 左开右闭 
                                 retbins=True, precision=3)                
         # 将空值单独分一箱（Category数据，要想插入一个之前没有的值，首先需要将这个值添加到.categories的容器中，然后再添加值。）
         df_var['bins'] = df_var['bins'].cat.add_categories(['NAN'])
         df_var['bins'] = df_var['bins'].fillna('NAN')
         #df_var['bins'].cat.categories
-        print(f"bins_list = {bins_list}")
-        return df_var, bins_list
+        print(f"cutoff_list = {cutoff_list}")
+        return df_var, cutoff_list
 
     
     def get_var_distr(self):
@@ -106,10 +106,10 @@ class VarDistrOddsWoeIv(object):
         频数分布：对该变量进行分箱，统计每一箱内样本个数/总样本个数
         """
         print("-->> get var distr...")
-        df_with_bins, bins_list = self.divide_var() # 分箱
+        df_with_bins, cutoff_list = self.divide_var() # 分箱
         df_distr = df_with_bins.groupby('bins').apply(lambda x: x.shape[0] * 1.0 / (len(self.value_list) + 1e-20)).reset_index()
         df_distr = df_distr.rename(columns={0: 'distr'})
-        return df_distr, bins_list
+        return df_distr, cutoff_list
 
 
     def get_var_positiveRate(self):
@@ -117,10 +117,10 @@ class VarDistrOddsWoeIv(object):
         正样本占比：对该变量进行分箱，统计每一箱内的label=1的样本个数/总样本个数
         """
         print("-->> get var positiveRate...")
-        df_with_bins, bins_list = self.divide_var() # 分箱
+        df_with_bins, cutoff_list = self.divide_var() # 分箱
         df_rate = df_with_bins.groupby('bins').apply(lambda x: x[x["label"] == 1].shape[0]*1.0 / (x.shape[0] + 1e-20)).reset_index()
         df_rate = df_rate.rename(columns={0: 'positiveRate'})
-        return df_rate, bins_list
+        return df_rate, cutoff_list
 
 
     @staticmethod
@@ -142,7 +142,7 @@ class VarDistrOddsWoeIv(object):
         woe/iv值：对该变量进行分箱，计算每一箱内的woe/iv
         """
         print("-->> get var woe...")
-        df_with_bins, bins_list = self.divide_var() # 分箱
+        df_with_bins, cutoff_list = self.divide_var() # 分箱
         total_p_cnt = df_with_bins[df_with_bins["label"]==1].shape[0]
         total_n_cnt = df_with_bins[df_with_bins["label"]==0].shape[0]
         df_woe = df_with_bins.groupby('bins').apply(lambda x: self._cal_woe_tmp(x, total_p_cnt, total_n_cnt)).reset_index(level=1, drop=True)
@@ -150,7 +150,7 @@ class VarDistrOddsWoeIv(object):
         df_woe["iv"] = (df_woe["p_rate"] - df_woe["n_rate"]) * df_woe["woe"]
         df_woe["sum_iv"] = df_woe["iv"].sum()
         df_woe["max_absWoe"] = max(df_woe["woe"].tolist(), key=abs)
-        return df_woe, bins_list
+        return df_woe, cutoff_list
 
 
     def plot_result(self, df_result_list):
@@ -218,10 +218,10 @@ if __name__ == '__main__':
             cnt_threshold=20, # 当unique(特征值)的个数<cnt_threshold，该变量当做类别变量处理，否则当做连续变量处理
             bins_mode='qcut', # 分箱模式
             bins_num=10, # # 分箱个数，与bins_mode搭配使用
-            bins_list=None, # 自定义分箱cutoff_list。此参数不为None的时候，参数cnt_threshold、bins_mode、bins_num失效
+            cutoff_list=None, # 自定义分箱cutoff_list。此参数不为None的时候，参数cnt_threshold、bins_mode、bins_num失效
             save_path=save_path)
         # 所有分箱结果
-        df_result, bins_list = var_instance.get_result()
+        df_result, cutoff_list = var_instance.get_result()
         df_result_list = [df_result]
         # 画图
         var_instance.plot_result(df_result_list) 
@@ -245,9 +245,9 @@ if __name__ == '__main__':
             cnt_threshold=20, # 当unique(特征值)的个数<cnt_threshold，该变量当做类别变量处理，否则当做连续变量处理
             bins_mode='qcut', # 分箱模式
             bins_num=10, # # 分箱个数，与bins_mode搭配使用
-            bins_list=None, # 自定义分箱cutoff_list。此参数不为None的时候，参数cnt_threshold、bins_mode、bins_num失效
+            cutoff_list=None, # 自定义分箱cutoff_list。此参数不为None的时候，参数cnt_threshold、bins_mode、bins_num失效
             save_path=save_path)
-        df_result_1, bins_list = var_instance.get_result()
+        df_result_1, cutoff_list = var_instance.get_result()
 
         # 第二个样本集合
         var_instance = VarDistrOddsWoeIv.VarDistrOddsWoeIv(
@@ -257,9 +257,9 @@ if __name__ == '__main__':
             cnt_threshold=20, 
             bins_mode='qcut', 
             bins_num=5, 
-            bins_list=bins_list, # 使用上一个集合相同的分箱cutoff进行分箱（注意：如果第2个样本集有超出第1个样本集范围的特征值，分箱的时候就不会被包含在内）
+            cutoff_list=cutoff_list, # 使用上一个集合相同的分箱cutoff进行分箱（注意：如果第2个样本集有超出第1个样本集范围的特征值，分箱的时候就不会被包含在内）
             save_path=save_path)
-        df_result_2, bins_list = var_instance.get_result()   
+        df_result_2, cutoff_list = var_instance.get_result()   
 
         # 将多个样本集的结果画在一张图上
         df_result_list = [df_result_1, df_result_2]
