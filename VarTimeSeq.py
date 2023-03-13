@@ -1,9 +1,9 @@
 # -*- coding:utf-8 -*-
 """
-@author: lisiqi
-@time: 2019/9/17 20:00
+@author: lanyue
+@startTime: 2019/09/17 20:00
+@updateTime: 2023/03/13 16:10
 """
-# -*- coding:utf-8 -*-
 import pandas as pd
 import os
 import numpy as np
@@ -24,190 +24,248 @@ try:
 except:
     pass
 
+
 class VarTimeSeq(object):
-    def __init__(self, df, var, label, split_col, save_path):
+    def __init__(self, var_name, value_list, label_list, time_list, cnt_threshold, bins_mode, bins_num, cutoff_list, save_path):
         """
         @目的：针对2分类任务的变量【时序性】分析，下面几张图要结合在一起看，单独看不全面！用时间进行分箱，粒度可以是月/周/天
-        1）时序分布稳定性：统计每箱内，分位数+最大最小值+平均值+样本占比+psi（ps:去掉空值计算）+missrate
-        2）时序表现稳定性：统计每箱内，auc+ks+样本positive_rate。（ps:不去掉空值计算，因为在实际使用的时候，不会只使用该特征覆盖样本建模）
-        :param var: 特征名称
-        :param df: 包含特征var和label的dataframe
-        :param split_col: 用来进行分箱的列，一般是时间，粒度可以是月/周/天
-        :param save_path:
+        1）时序分布稳定性：统计每箱内，分位数+最大最小值+平均值+样本占比+psi（ps:这些统计需要去掉空值）+missrate
+        2）时序表现稳定性：统计每箱内，auc+ks+样本positive_rate（ps:不去掉空值计算，因为在实际使用的时候，不会只使用该特征覆盖样本建模）
         """
-        self.__df = df
-        self.__var = var
-        self.__label = label
-        self.__split_col = split_col
-        self.__save_path = save_path
-#         self.get_all_result()
+        if len(value_list) != len(label_list):
+            raise ValueError("len(value) and len(label) is not equal, please check!!!")
+        self.var_name = var_name # 变量名称
+        self.value_list = value_list # 变量的值，示例[1,4,2]
+        self.label_list = label_list # 二分类label_list, 与value_list一一对应，示例[1,1,0]
+        self.time_list = time_list # 时间列，与value_list一一对应，示例['2023-01','2023-02','2023-03']
+        self.cnt_threshold = cnt_threshold # 变量唯一值个数的阈值。该变量的唯一值个数>cnt_threshold，被认为是连续变量，否则离散变量
+        self.bins_mode = bins_mode # 分箱方法，='cut'代表等宽分箱，='qcut'代表等频分箱。
+        self.bins_num = bins_num # 分箱个数。搭配cnt_threshold+bins_mode一起使用。计算IV值的时候会用到
+        self.cutoff_list = cutoff_list # 自定义分箱的切分点cutoff_list，如果该值不为空，会优先使用该分箱方法，此时参数bins_num+bing_mode失效
+        self.save_path = save_path # 结果保存路径
+
+        self.df = pd.DataFrame({self.var_name: self.value_list, "label": self.label_list, 'time_bins':self.time_list})
+        self.df['time_bins'] = self.df['time_bins'].astype(str)
+        # 去掉空值之后的数据（ps：注意空值的判断逻辑，可根据实际情况调整）
+        self.null_value_list = ["NULL", "null", ""]
+        self.df_notnull = self.df[(self.df[self.var_name].notnull()) & (~self.df[self.var_name].isin(self.null_value_list))] 
+
+     
+    
+    # @staticmethod
+    # def cal_ks_auc(label_list, prob_list):
+    #     print("计算特征的AUC、KS（PS：该特征值的取值范围只能是0~1之间！！）...")
+    #     auc = metrics.metrics.roc_auc_score(label_list, prob_list)
+    #     fpr,tpr,thresholds= metrics.roc_curve(label_list, prob_list)
+    #     ks = max(tpr-fpr)
+    #     return pd.DataFrame.from_dict({'auc':auc, 'ks':ks}, orient='index').T
+        
+    @staticmethod   
+    def ks_stat(label_list, value_list):
+        # 100等频分箱计算ks
+        df = pd.DataFrame({'X': value_list, 'Y': label_list})
+        floor = df.X.min()
+        ceiling = df.X.max()
+        step = -(ceiling - floor) / 100
+        cut_list = np.arange(ceiling, floor, step)
+        ks_thgrouphold = 0
+        max_distance = 0
+        for cut in cut_list:
+            tp = max(0.00001, df.loc[(df.X >= cut) & (df.Y == 1), :].shape[0])
+            fp = max(0.00001, df.loc[(df.X >= cut) & (df.Y == 0), :].shape[0])
+            fn = max(0.00001, df.loc[(df.X < cut) & (df.Y == 1), :].shape[0])
+            tn = max(0.00001, df.loc[(df.X < cut) & (df.Y == 0), :].shape[0])
+
+            tpr = round(float(tp) / (tp + fn), 4)
+            fpr = round(float(fp) / (fp + tn), 4)
+            distance = abs(tpr - fpr)
+
+            if distance > max_distance:
+                max_distance = distance
+                ks_thgrouphold = cut
+        return round(max_distance, 3), ks_thgrouphold
+
+     
+    def cal_ks_auc(self, label_list, value_list, fix_auc=True):
+        # 计算特征的AUC、KS
+        f = [float(item) for item in value_list]
+        label_cnt = len(set(label_list))
+        value_cnt = len(set(value_list))
+        if label_cnt != 2:
+            print(f'label distinct is {label_cnt}!!!') 
+            return pd.DataFrame.from_dict({'auc':-1, 'ks':-1}, orient='index').T
+        elif value_cnt == 1:
+            print(f'value distinct is {value_cnt}!!!')
+            return pd.DataFrame.from_dict({'auc':-1, 'ks':-1}, orient='index').T
+        ks, ksth = self.ks_stat(label_list, f)
+        auc = metrics.roc_auc_score(label_list, f)
+        if fix_auc:
+            auc = max(auc, 1-auc)
+        return pd.DataFrame.from_dict({'auc':auc, 'ks':ks}, orient='index').T
+     
+    def get_bins_auc(self):
+        """
+        变量的跨月表现AUC/KS：用时间对该变量进行分箱，计算每箱内特征的AUC/KS
+        """        
+        print("--> get var bins_auc...") 
+        # 新方法计算AUC/KS(ps: 传入的特征值的取值范围,没必要必须是0到1之间)
+        df_auc = self.df.groupby('time_bins').apply(lambda x: self.cal_ks_auc(x['label'], x[self.var_name])).reset_index(level=1, drop=True)
+        return df_auc    
+      
 
         
+    def get_bins_missrate(self):
+        """
+        变量缺失率：用时间对该变量进行分箱，统计每箱内该变量的缺失率
+        """
+        print("--> get var missrate...")
+        df_missrate = self.df.groupby('time_bins').apply(lambda x: ((x[self.var_name].isin(self.null_value_list)) | (x[self.var_name].isnull())).sum()*1.0 / (x.shape[0]+1e-20))
+        return df_missrate
+    
+    
+
+    def get_bins_positiveRate(self):
+        """
+        样本positiveRate：用时间对该变量进行分箱，统计每箱内的label=1的样本个数/总样本个数
+        """
+        print("--> get var positiveRate...")
+        df_positiveRate = self.df.groupby('time_bins').apply(lambda x: x['label'].sum()*1.0 / (x.shape[0]+1e-20))
+        return df_positiveRate
+    
+
+
+    
+    def get_bins_distr(self):
+        """
+        样本的频数分布：用时间对该变量进行分箱，统计每箱内的样本频数占比
+        """
+        print("--> get var cnt...")
+        df_distr = self.df.groupby('time_bins').apply(lambda x: x.shape[0]*1.0)
+        return df_distr 
+      
+
+        
+
     @staticmethod    
-    def __cal_quantile(df,var):
+    def cal_quantile(df, var):
     # 计算分位数
         return pd.DataFrame.from_dict(
             {
                 "min": df[var].min(),
+                "10%": df[var].quantile(0.1),
                 "20%": df[var].quantile(0.2),
+                "30%": df[var].quantile(0.3),
                 "40%": df[var].quantile(0.4),
                 "50%": df[var].quantile(0.5),
                 "60%": df[var].quantile(0.6),
+                "70%": df[var].quantile(0.7),
                 "80%": df[var].quantile(0.8),
                 "90%": df[var].quantile(0.9),
+                "99%": df[var].quantile(0.95),
                 "99%": df[var].quantile(0.99),
                 "max": df[var].max(),
                 "mean": df[var].mean()
-            }, orient='index').T  
-            
-    @staticmethod
-    def single_train(label_list,var_list):
-        """
-        用该特征单独训练一个模型，得到pvalue，用来计算AUC/KS。K折交叉赋分，比较准确             
-        """
-        print("用该特征单独训练一个模型，得到pvalue，用来计算AUC/KS。K折交叉赋分，比较准确!")
-        df = pd.DataFrame({'label':label_list, 'var':var_list})
-        #df['label'] = df['label'].astype('int64')
-        clf = LGBMClassifier(
-                  metric='binary_logloss', is_unbalance=True, random_state=11, 
-                  silent=True, n_jobs=10, reg_alpha=0.3, reg_lambda=0.3
-                  ,learning_rate=0.01, n_estimators=2000, subsample=0.6, colsample_bytree=0.3
-                  ,num_leaves=7, max_depth=3, min_child_samples=2000
-                  ,min_split_gain=0.1, min_child_weight=0.1
-                  #,is_training_metric=True, max_bin=255, subsample_for_bin=400, ,objective='binary'
-                  ,importance_type='gain',
-                  )     
-        # kfold
-        kf = KFold(n_splits=3, shuffle=True) # 注意交叉赋分的时候必须要打乱顺序，保证好坏样本比例类似！！！要不然每一折的test AUC不稳定
-        df = df.reset_index(drop=True) # index必须从0开始，要不然交叉的时候出错
-        for train_index, test_index in kf.split(df): 
-            clf.fit(df.loc[train_index, 'var'].values.reshape(-1, 1),df.loc[train_index, 'label']) 
-            prob_list = clf.predict_proba(df.loc[test_index, 'var'].values.reshape(-1, 1))[:, 1] # 给test集打分 
-            df.loc[test_index, "pvalue"] = prob_list  # 保留交叉赋分之后的pvalue      
-        return df['pvalue'].tolist()
-        
-    @staticmethod 
-    def cal_auc(label_list,prob_list):
-        print("根据pvalue，计算AUC、KS")
-        auc = metrics.roc_auc_score(label_list, prob_list)
-        fpr,tpr,thresholds= metrics.roc_curve(label_list, prob_list)
-        ks = max(tpr-fpr)
-        return pd.DataFrame.from_dict({'auc':auc, 'ks':ks}, orient='index').T
-     
-    def get_var_missrate(self):
-        """
-        变量缺失率：用时间对该变量进行分箱，统计每一箱内该变量的缺失率（为空的样本占比）。（ps：注意空值的判断逻辑，可根据实际情况调整）
-        """
-        print("get var missrate".center(80, '*'))
-        null_value_list = ["NULL", "null", "", np.nan]
-        df_missrate = self.__df.groupby(self.__split_col).apply(lambda x: x[(x[self.__var].isin(null_value_list)) | (x[self.__var].isnull())].shape[0]*1.0 / (x.shape[0]+1e-20))
-        return df_missrate
-    
-    def get_var_positiveRate(self):
-        """
-        样本positiveRate：用时间对该变量进行分箱，统计每一箱内的label=1的样本个数/总样本个数（不去掉空值样本）
-        """
-        print("get var positiveRate".center(80,'*'))
-        # df_positiveRate = self.__df.groupby(self.__split_col).apply(lambda x: x[self.__label].sum()*1.0 / (x[x[self.__label] == 0].shape[0]+1e-20))
-        df_positiveRate = self.__df.groupby(self.__split_col).apply(lambda x: x[self.__label].sum()*1.0 / (x.shape[0]+1e-20))
-        return df_positiveRate
-    
-    def get_var_auc(self):
-        """
-        变量的跨月表现AUC/KS：用时间对该变量进行分箱，计算每一箱内特征的AUC/KS（不去掉空值样本）
-        """        
-        print("get var bins_auc".center(80, '*')) 
-        df_copy = self.__df[[self.__var, self.__label,self.__split_col]]
-        # df_copy['pvalue'] = self.single_train(label_list=df_copy[self.__label], var_list=df_copy[self.__var]) # 用原值进行训练，然后计算AUC
-        df_copy['pvalue'] = df_copy[self.__var].fillna(-1) # 用原值计算AUC
-        # print(df_copy[self.__label].isnull().sum())
-        df_auc = df_copy.groupby(self.__split_col).apply(lambda x: self.cal_auc(x[self.__label],x['pvalue'])).reset_index(level=1, drop=True)
-        return df_auc
-    
-    def get_var_distr(self):
-        """
-        样本的频数分布：用时间对该变量进行分箱，统计每一箱内的样本频数占比（去掉空值样本）
-        """
-        print("get var distr".center(80, '*'))
-        # 去掉空值
-        df_copy = self.__df[(~self.__df[self.__var].isin(["NULL", "null", "", np.nan])) & (self.__df[self.__var].notnull())][[self.__var, self.__label,self.__split_col]]
-        df_distr = df_copy.groupby(self.__split_col).apply(lambda x: x.shape[0]*1.0 / (df_copy.shape[0]+1e-20))
-        return df_distr 
-        
-    def get_var_quantile(self):
-        """
-        变量的分位数：用时间对该变量进行分箱，统计每一箱内该特征的各个分位数，观察其跨时间稳定性（去掉空值样本）
-        """
-        print("get var quantile".center(80, '*'))
-        # 去掉空值
-        df_copy = self.__df[(~self.__df[self.__var].isin(["NULL", "null", "", np.nan])) & (self.__df[self.__var].notnull())][[self.__var, self.__split_col]]
-        df_quantile = df_copy.groupby(self.__split_col).apply(lambda x: self.__cal_quantile(x,self.__var)).reset_index(level=1, drop=True)
-        return df_quantile
+            }, orient='index').T 
 
-    def get_var_psi(self, bins_num=5, reverse_mode=False):
+    def get_bins_quantile(self):
         """
-        变量psi：用时间对该变量进行分箱，以第1箱为base集，后面每一箱分别作为test集，计算psi（去掉空值样本，并注意每一箱内的样本量！）
-        输入：
-        reverse_mode：根据时间进行分箱，选定时间最近的一个分箱还是最远一个分箱作为base集，计算psi。=TRUE，选定最远一个时间分箱作为base集；=FALSE，选定最近一个时间分箱，最为base集
+        变量的分位数：用时间对该变量进行分箱，统计每箱内该特征的各个分位数，观察其跨时间稳定性（去掉空值样本!）
         """
-        print("get var psi".center(80, '*')) 
-        # 一定要copy，不能在原始的上面进行删改！！！！！
-        df_copy = self.__df[[self.__var, self.__split_col]]
-        df_copy[self.__split_col] = df_copy[self.__split_col].astype(str)
-        print('df_ori.shape = ', df_copy.shape)
-        
+        print("--> get var quantile(在非空样本上)...")
+        # 在非空样本上统计
+        df_quantile = self.df_notnull.groupby('time_bins').apply(lambda x: self.cal_quantile(x, self.var_name)).reset_index(level=1, drop=True)
+        return df_quantile
+    
+ 
+
+
+    def binning_var(self, df):
+        """
+        对变量进行分箱(PS：用于计算psi)
+        1、自定义分箱：传入自定义cutoff_list
+        2、自动分箱：区分连续变量和离散变量：如果该变量唯一值的个数>=self.cnt_threshold，认为是连续变量，否则离散变量；
+        1）连续变量：等宽/等频分箱；
+        2）离散：每个值单独分一箱；
+        3）空值单独分一箱;
+        """        
+        null_value_list = ["NULL", "null", ""]
+        df_notnull = df[(~df[self.var_name].isin(null_value_list)) & (df[self.var_name].notnull())]
+        unique_value_cnt = len(df[self.var_name].unique())
+
+        # 确定分箱区间
+        if self.cutoff_list is not None: # 如果传入了自定义的分箱cutoff_list
+            print(f"自定义分箱(左开右闭)...")
+            cutoff_list = sorted(set(self.cutoff_list)) # 去重排序
+            #cutoff_list[0] = cutoff_list[0] - 1e-20 # 最小值额外减去一个极小数，为了能包含原bins的最小值
+        elif unique_value_cnt < self.cnt_threshold:
+            print(f"类别变量【该变量的唯一值个数({unique_value_cnt}) < 阈值({self.cnt_threshold})】。每个值单独分一箱...")
+            cutoff_list = sorted(df_notnull[self.var_name].unique()) # 去掉空值
+            cutoff_list = [cutoff_list[0] - 1e-20] + cutoff_list # 左侧额外加一个值，为了能包含原bins的最小值
+        elif unique_value_cnt >= self.cnt_threshold and self.bins_mode == 'cut': 
+            print(f"连续变量【该变量的唯一值个数({unique_value_cnt}) >= 阈值({self.cnt_threshold})】。等宽分箱(左开右闭)...")
+            min_value = df_notnull[self.var_name].min()
+            max_value = df_notnull[self.var_name].max()
+            step = (max_value - min_value)*1.0 / self.bins_num # 去掉空值求等宽cutoff
+            cutoff_list = list(np.arange(min_value, max_value+step, step))
+            cutoff_list = sorted(set(cutoff_list)) # 去重排序
+            cutoff_list[0] = cutoff_list[0] - 1e-20 # 最小值额外减去一个极小数，为了能包含原bins的最小值
+        elif unique_value_cnt >= self.cnt_threshold and self.bins_mode == 'qcut':  
+            print(f"连续变量【该变量的唯一值个数({unique_value_cnt}) >= 阈值({self.cnt_threshold})】。等频分箱(左开右闭)...")
+            step = 1.0 / self.bins_num
+            cutoff_list = [df_notnull[self.var_name].quantile(i) for i in np.arange(0, 1+step, step)] # 去掉空值求等频cutoff
+            cutoff_list = sorted(set(cutoff_list))
+            cutoff_list[0] = cutoff_list[0] - 1e-20 
+               
+        # 分箱 
+        df["bins"], cutoff_list = pd.cut(df[self.var_name], bins=cutoff_list, 
+                                include_lowest=False, right=True, # 左开右闭 
+                                retbins=True, precision=3)                
+        # 将空值单独分一箱（Category数据，要想插入一个之前没有的值，首先需要将这个值添加到.categories的容器中，然后再添加值。）
+        df['bins'] = df['bins'].cat.add_categories(['NAN'])
+        df['bins'] = df['bins'].fillna('NAN')
+        # df['bins'].cat.categories
+        print(f"cutoff_list = {cutoff_list}")
+        return df, cutoff_list  
+
+    def get_bins_psi(self, reverse_mode=False):
+        """
+        计算变量psi：用时间对该变量进行分箱，计算psi（计算每月psi的时候还要分箱，空值单独分一箱。注意每一箱内的样本量！）
+        reverse_mode：=TRUE，选定最远一个时间分箱作为base集；=FALSE，选定最近一个时间分箱，作为base集。其余作为test集。
+        """
+        print("--> get var psi(计算psi的时候，空值单独分一箱)...")     
         # base集 
-        df_base = df_copy[df_copy[self.__split_col] == sorted(df_copy[self.__split_col].unique(), reverse=reverse_mode)[0]]
-        print('df_base.shape = ', df_base.shape,'df_base time = ', df_base[self.__split_col].unique())      
-        # 对base去掉空值
-        df_base = df_base[~df_base[self.__var].isin(["NULL", "null", "", np.nan]) & (df_base[self.__var].notnull())] 
-        print('去掉空值后 df_base.shape = ', df_base.shape)
-        # 再对base进行等频分箱，得到分箱区间
-        bins_list = []
-        for i in np.arange(0, 1.1, 1.0/bins_num): #
-            bins_list.append(df_base[self.__var].quantile(q=i))
-        bins_list = sorted(list(set(bins_list)))  # 注意去掉相同的边界！！！
-        # 由于边界值需要被包含在内，所以最大最小值分别处理一下
-        min = bins_list[0] - 1e-20
-        max = bins_list[-1] + 1e-20
-        bins_list = [min] + bins_list[1:-1] + [max]
-        # 分箱
-        df_base["bins"] = pd.cut(df_base[self.__var], bins=bins_list, duplicates='drop') # 注意去掉相同的边界！！！
-        # 计算各箱内占比
-        df_base_result = df_base.groupby("bins").apply(lambda x: x.shape[0]*1.0 / (df_base.shape[0]+1e-20))
-        # 以每一个时间分箱作为test集，计算psi
-        df_psi = pd.DataFrame(columns={"psi"}, index=sorted(df_copy[self.__split_col].unique()) )
-        for bins in sorted(df_copy[self.__split_col].unique()) : 
+        base_time_bin = sorted(self.df['time_bins'].unique(), reverse=reverse_mode)[0]
+        df_base = self.df[self.df['time_bins'] == base_time_bin]
+        print('df_base.shape = ', df_base.shape, '时间范围 = ', df_base['time_bins'].unique())     
+        # 分箱，得到cutoff_list        
+        df_base, cutoff_list = self.binning_var(df=df_base)
+        df_base_result = df_base.groupby("bins").apply(lambda x: x.shape[0]*1.0 / (df_base.shape[0]+1e-20)) # 计算各箱内占比
+        
+        # test集
+        df_psi = pd.DataFrame(columns={"psi"}, index=sorted(self.df['time_bins'].unique()) )
+        df_psi.index.name = 'bins'
+        # 使用df_base的cutoff_list进行分箱
+        self.cutoff_list = cutoff_list  
+        for bins in sorted(self.df['time_bins'].unique()) : 
             # print("---bins = %s---" % bins)
-            df_test = df_copy[df_copy[self.__split_col] == bins]
-            # 去掉空值
-            df_test = df_test[~df_test[self.__var].isin(["NULL", "null", "", np.nan]) & (df_test[self.__var].notnull())] 
-            print("去掉空值之后df_test.shape = ", df_test.shape, '时间范围 = ', bins)
-            # 使用df_base的分箱区间进行分箱
-            df_test["bins"] = pd.cut(df_test[self.__var], bins=bins_list, duplicates='drop') # 注意去掉相同的边界！！！
-            # 计算各分箱内占比
-            df_test_result = df_test.groupby("bins").apply(lambda x: x.shape[0]*1.0 / (df_test.shape[0]+1e-20))           
+            df_test = self.df[self.df['time_bins'] == bins]           
+            print("df_test.shape = ", df_test.shape, '时间范围 = ', bins)
+            # 使用df_base的cutoff_list进行分箱
+            df_test, test_cutoff_list = self.binning_var(df=df_test)
+            df_test_result = df_test.groupby("bins").apply(lambda x: x.shape[0]*1.0 / (df_test.shape[0]+1e-20)) # 计算各分箱内占比
             # psi          
             df_result = pd.concat([df_base_result, df_test_result], axis=1, keys=["distr_base", "distr_test"])
             df_result['psi_tmp'] = df_result.apply(lambda x: (x['distr_base'] - x['distr_test']) * math.log((x['distr_base']+1e-20) / (x['distr_test']+1e-20)), axis=1)           
             df_psi.loc[bins, 'psi'] = df_result['psi_tmp'].sum()
+            # print(df_result)
         return df_psi  
-    
-    def get_all_result(self):
-        df_missrate = self.get_var_missrate()
-        df_quantile = self.get_var_quantile()
-        df_positiveRate = self.get_var_positiveRate()
-        df_distr = self.get_var_distr()
-        df_psi = self.get_var_psi()
-        df_auc = self.get_var_auc()
-        df_result = pd.concat([df_quantile, df_missrate, df_positiveRate, df_distr, df_psi, df_auc], axis=1, join='outer')  # 按照列进行拼接
-        df_result.rename(columns={0:"missrate", 1:"positiveRate", 2:"distr", 3:"psi",4:"auc"}, inplace=True)
-        df_result.to_csv(self.__save_path + '/%s_quantile_missrate_positiveRate_distr_psi_auc.csv' % self.__var, index=True,encoding="utf-8")
-        print(self.__save_path + '/%s_quantile_missrate_positiveRate_distr_psi_auc.csv' % self.__var)
-        self.plot_all(df_result)
+
+
+
+
         
     @staticmethod 
-    def __plot(X, Y, name):        
+    def plot(X, Y, name):        
         #         plt.plot(list(range(len(X))), Y, label=label) 
         #         plt.xticks(list(range(len(X))), tuple(X), color='black', rotation=45) # 横坐标旋转60度
         plt.plot(X, Y, label=name) 
@@ -216,62 +274,82 @@ class VarTimeSeq(object):
             plt.text(a, b, '%s' % (round(b, 3)), ha='center', va='bottom', fontsize=10) # plt.text 在曲线上显示y值 
         plt.legend(loc='upper left')  # 用来显示图例
     
-    def plot_all(self, df_result):
-        print("start plot!")
+    def plot_distribution_performance(self):
+        print("--> plot distribution_erformance_byTime...")
+        df_missrate = self.get_bins_missrate()
+        df_quantile = self.get_bins_quantile()
+        df_positiveRate = self.get_bins_positiveRate()
+        df_distr = self.get_bins_distr()
+        df_psi = self.get_bins_psi()
+        df_auc = self.get_bins_auc()
+        df_result = pd.concat([df_quantile, df_missrate, df_positiveRate, df_distr, df_psi, df_auc], axis=1, join='outer')  # 按照列进行拼接
+        df_result.rename(columns={0:"missrate", 1:"positiveRate", 2:"cnt", 3:"psi", 4:"auc"}, inplace=True)
+        df_result.to_csv(self.save_path + f"/{self.var_name}_distribution_performance_byTime.csv", index=True, encoding="utf-8")
+        print(self.save_path + f"/{self.var_name}_distribution_performance_byTime.csv")
+
+        # 画图
         plt.figure(figsize=(30, 8))
-        plt.tick_params(labelsize=8)  # tick_params可设置坐标轴刻度值属性
+        plt.tick_params(labelsize=10)  # tick_params可设置坐标轴刻度值属性
         X = [str(x) for x in df_result.index] 
-        need_to_plot = ["quantile",'distr_psi_missrate','positiveRate_auc_ks']
+        need_to_plot = ["quantile", 'cnt', 'psi_missrate', 'positiveRate_auc_ks']
         for col,j in zip(need_to_plot, list(np.arange(1,len(need_to_plot)+1,1))):
             ax1 = plt.subplot(1,len(need_to_plot),j) # 分画布
             if col == "quantile": 
-                for i in ["20%", "40%", "50%", "60%", "80%", "90%", "mean"]: # 太大或者太小的值都不要画出来，因为有可能存在异常值
-                    self.__plot(X, df_result[i].tolist(), i)
+                for i in ["10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "90%", "mean"]: # 太大或者太小的值都不要画出来，因为有可能存在异常值
+                    self.plot(X, df_result[i].tolist(), i)
+            elif col == 'cnt':
+                self.plot(X, df_result[col].tolist(), i)   
+            elif col == 'psi_missrate':
+                for i in col.split("_"):
+                    self.plot(X, df_result[i].tolist(), i)   
+                # missrate使用另一个Y轴
+                #ax2 = ax1.twinx()
+                #ax2.bar(X, df_result["missrate"], width=0.2, label="missrate",alpha=0.3)
             elif col == 'positiveRate_auc_ks':
                 for i in col.split("_"):
-                    self.__plot(X, df_result[i].tolist(), i)              
-            elif col == 'distr_psi_missrate':
-                for i in col.split("_")[:2]: # 这几个使用同一个Y轴，因为数量级差不多
-                    self.__plot(X, df_result[i].tolist(), i)   
-                # missrate使用另一个Y轴
-                ax2 = ax1.twinx()
-                ax2.bar(X, df_result["missrate"], width=0.2, label="missrate",alpha=0.3)
-                plt.xticks(X, tuple(X), color='black', rotation=30) # 横坐标旋转
-                for a, b in zip(X, df_result["missrate"]): 
-                    plt.text(a, b, '%s' % (round(b, 3)), ha='center', va='bottom', fontsize=10)  # plt.text 在曲线上显示y值    
-                plt.legend(loc='upper right')  # 用来显示图例
+                    self.plot(X, df_result[i].tolist(), i) 
             plt.grid(axis='y', color='#8f8f8f', linestyle='--', linewidth=1)  # 显示网格
             plt.grid(axis='x', color='#8f8f8f', linestyle='--', linewidth=1)  # 显示网格
-            plt.title('%s_%s' % (self.__var, col))
-            plt.xlabel("%s" % self.__split_col) 
-            plt.ylabel(col) 
-        path = os.path.join(self.__save_path, self.__var+'_quantile_missrate_positiveRate_distr_psi_auc.png')
+            plt.title(col)
+            plt.xlabel('time_bins') 
+            # plt.ylabel(col) 
+        plt.suptitle(f"{self.var_name}: distribution_performance_byTime", fontsize=15) # 画布总标题
+        path = os.path.join(self.save_path, self.var_name+'_distribution_performance_byTime.png')
         print("save_path is %s" % path)
         plt.savefig(path)
+        plt.show()
         plt.close()
         
-    def plot_quantile_psi_missrate(self, df_quantile, df_psi, df_missrate):
-        df_result = pd.concat([df_quantile, df_psi, df_missrate], axis=1, join='outer')  # 按照列进行拼接
-        df_result.rename(columns={0:"missrate"}, inplace=True)
-        df_result.to_csv(self.__save_path + '/%s_quantile_psi_missrate.csv' % self.__var, index=True,encoding="utf-8")
-        print("start plot!")
+    def plot_distribution(self):
+        print("--> plot distribution_byTime...")
+        df_missrate = self.get_bins_missrate()
+        df_quantile = self.get_bins_quantile()
+        df_distr = self.get_bins_distr()
+        df_psi = self.get_bins_psi()
+        df_result = pd.concat([df_quantile, df_missrate, df_distr, df_psi], axis=1, join='outer')  # 按照列进行拼接
+        df_result.rename(columns={0:"missrate", 1:"cnt", 2:"psi"}, inplace=True)
+        df_result.to_csv(self.save_path + f"/{self.var_name}_distribution_byTime.csv", index=True, encoding="utf-8")
+        print(self.save_path + f"/{self.var_name}_distribution_byTime.csv")
+        
+        # 画图
         plt.figure(figsize=(30, 8))
-        plt.tick_params(labelsize=8)  # tick_params可设置坐标轴刻度值属性
+        plt.tick_params(labelsize=10)  # tick_params可设置坐标轴刻度值属性
         X = [str(x) for x in df_result.index]
-        need_to_plot = ["quantile",'psi',"missrate"]
-        for col,j in zip(need_to_plot, list(np.arange(1,len(need_to_plot)+1,1))):
-            ax1 = plt.subplot(1,len(need_to_plot),j) # 分画布
+        need_to_plot = ["quantile", 'psi', "missrate", 'cnt']
+        for col, j in zip(need_to_plot, list(np.arange(1,len(need_to_plot)+1, 1))):
+            ax1 = plt.subplot(1,len(need_to_plot), j) # 分画布
             if col == "quantile": 
-                for i in ["20%", "40%", "50%", "60%", "80%", "90%", "mean"]: # 太大或者太小的值都不要画出来，因为有可能存在异常值
-                    self.__plot(X, df_result[i].tolist(), i)
+                for i in ["10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "90%", "mean"]: # 太大或者太小的值都不要画出来，因为有可能存在异常值
+                    self.plot(X, df_result[i].tolist(), i)
             else:
-                self.__plot(X, df_result[col].tolist(), col)   
+                self.plot(X, df_result[col].tolist(), col)   
             plt.grid(axis='y', color='#8f8f8f', linestyle='--', linewidth=1)  # 显示网格
             plt.grid(axis='x', color='#8f8f8f', linestyle='--', linewidth=1)  # 显示网格
-            plt.title("%s_%s" % (self.__var,col))
-            plt.xlabel("%s" % self.__split_col) 
-            plt.ylabel("%s_%s" % (self.__var,col))
-        path = os.path.join(self.__save_path, self.__var+'_quantile_psi_missrate.png')
+            plt.title(col)
+            plt.xlabel('time_bins') 
+            # plt.ylabel(col)
+        plt.suptitle(f"{self.var_name}: distribution_byTime", fontsize=15) # 画布总标题
+        path = self.save_path + f'{self.var_name}_distribution_byTime.png'
         print("save_path is %s" % path)
         plt.savefig(path)
         plt.show()
@@ -279,29 +357,41 @@ class VarTimeSeq(object):
         
         
 if __name__ == '__main__':
+    # 引入自定义包
+    import sys
+    sys.path.append('/data/users/lisiqi/')
+    from src import VarTimeSeq
+
+    import importlib
+    importlib.reload(VarTimeSeq)
+
+    df = df_ori
+    feat_list = ['score']
+
     # 将制指定值，变成空
     # df[feat_list] = df[feat_list].applymap(lambda x: np.nan if x in [-1,-2,-3,'-1','-2','-3'] else x)   
 
     # 按照时间月/周/日分箱   
-    df['split_time'] = df[split_col].apply(lambda x: str(x)[0:7])
+    df['split_time'] = df['sample_time_x'].apply(lambda x: str(x)[0:7])
     print(sorted(df['split_time'].unique()))
-    #df['split_time'] = df['split_time'].apply(lambda x: '2019-12-0' if x in [ '2019-12-1', '2019-12-2','2019-12-3'] else x)
-    #df['split_time'] = df.apply(lambda x: x[split_time] if x[split_time] >= '2020-04-01' else x['split_time'], axis=1)
-    
-    # 如果某些月份样本过少，可以跟相邻月份合并在一起
-    N = 1
-    time_list = sorted(df['split_time'].unique(), reverse=True)
-    df['split_time'] = df['split_time'].apply(lambda x: str(time_list[0])+'~'+str(time_list[N-1]) if x in time_list[0:N] else x)
-    
+
+    # 保存整体psi值
+    df_psi = pd.DataFrame({'var_name': feat_list})
     for var in feat_list:
-        print(("feature %s" % var).center(80, '-'))
-        var_time_seq = VarTimeSeq(df=df,
-                                  var=var,
-                                  label='label',
-                                  split_col='split_time',
-                                  save_path='/result/')
-    df_quantile = var_time_seq.get_var_quantile()
-    df_psi = var_time_seq.get_var_psi(bins_num=5, reverse_mode=False) # reverse_mode=False表示计算psi的时候，按照时间正序排列，以第一个月份为base集
-    df_missrate = var_time_seq.get_var_missrate()
-    var_time_seq.plot_quantile_psi_missrate(df_quantile, df_psi, df_missrate)
-      
+        # if len(df[var].unique())>=3: # 除去这种类型的特征：[1，1，1，nan,1,1] 和[1,1,1,1,1]
+        print((" var = %s" % var).center(80, '*'))
+        var_time_seq = VarTimeSeq.VarTimeSeq(var_name=var,
+                                            value_list=df[var],
+                                            label_list=df['d5_y'],
+                                            time_list=df['split_time'],
+                                            cnt_threshold=30, 
+                                            bins_mode='qcut', 
+                                            bins_num=10, 
+                                            cutoff_list=None, 
+                                            save_path='/data/users/lisiqi/tmp/')
+        # var_time_seq.plot_distribution() # 只画分布
+        var_time_seq.plot_distribution_performance() # 画分布+表现
+    #     df_result = var_time_seq.get_bins_psi(reverse_mode=True)
+    #     df_result.to_csv(save_path + '%s_psi.csv' % var, index=True,encoding="utf-8")
+    #     df_psi.loc[df_psi['var_name']==var, 'psi'] = df_result.loc['OOT[2022-01-01, 2022-06-30]','psi']
+    # df_psi.sort_values(by='psi', ascending=False, na_position='last').to_csv(save_path + r'psi.csv', index=None)
