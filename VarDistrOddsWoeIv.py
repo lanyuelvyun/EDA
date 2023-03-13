@@ -52,7 +52,7 @@ class VarDistrOddsWoeIv(object):
         return df_result, cutoff_list
         
 
-    def divide_var(self):
+    def binning_var(self):
         """
         对变量进行分箱：
         1、自定义分箱：传入自定义cutoff_list
@@ -106,7 +106,7 @@ class VarDistrOddsWoeIv(object):
         频数分布：对该变量进行分箱，统计每一箱内样本个数/总样本个数
         """
         print("-->> get var distr...")
-        df_with_bins, cutoff_list = self.divide_var() # 分箱
+        df_with_bins, cutoff_list = self.binning_var() # 分箱
         df_distr = df_with_bins.groupby('bins').apply(lambda x: x.shape[0] * 1.0 / (len(self.value_list) + 1e-20)).reset_index()
         df_distr = df_distr.rename(columns={0: 'distr'})
         return df_distr, cutoff_list
@@ -117,7 +117,7 @@ class VarDistrOddsWoeIv(object):
         正样本占比：对该变量进行分箱，统计每一箱内的label=1的样本个数/总样本个数
         """
         print("-->> get var positiveRate...")
-        df_with_bins, cutoff_list = self.divide_var() # 分箱
+        df_with_bins, cutoff_list = self.binning_var() # 分箱
         df_rate = df_with_bins.groupby('bins').apply(lambda x: x[x["label"] == 1].shape[0]*1.0 / (x.shape[0] + 1e-20)).reset_index()
         df_rate = df_rate.rename(columns={0: 'positiveRate'})
         return df_rate, cutoff_list
@@ -142,7 +142,7 @@ class VarDistrOddsWoeIv(object):
         woe/iv值：对该变量进行分箱，计算每一箱内的woe/iv
         """
         print("-->> get var woe...")
-        df_with_bins, cutoff_list = self.divide_var() # 分箱
+        df_with_bins, cutoff_list = self.binning_var() # 分箱
         total_p_cnt = df_with_bins[df_with_bins["label"]==1].shape[0]
         total_n_cnt = df_with_bins[df_with_bins["label"]==0].shape[0]
         df_woe = df_with_bins.groupby('bins').apply(lambda x: self._cal_woe_tmp(x, total_p_cnt, total_n_cnt)).reset_index(level=1, drop=True)
